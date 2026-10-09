@@ -1,0 +1,21 @@
+# Leader/follower teleop recorded with ROS 2 (e.g. an SO-101 arm pair)
+fps: 30
+robot_type: so101_follower
+task: pick the cube and place it in the bin
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name        # column names + stable joint order
+  action:
+    topic: /leader/joint_states
+    field: position
+    names_from: name
+  observation.ee_pose:
+    topic: /ee_pose          # geometry_msgs/PoseStamped
+    fields: [pose.position, pose.orientation]
+sync:
+  method: hold              # hold = latest sample (causal); linear = interpolate
+  max_staleness_s: 0.25     # frames using older data are reported as stale
+  trim_to_overlap: true     # start/end where every topic has data
+time_source: header         # header stamps; "bag" uses record time
