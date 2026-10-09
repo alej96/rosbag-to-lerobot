@@ -1,0 +1,91 @@
+"""Conversion config: which topics and fields become which LeRobot features."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+
+SYNC_METHODS = ("hold", "linear")
+TIME_SOURCES = ("header", "bag")
+
+
+@dataclass
+class FeatureSpec:
+    key: str  # LeRobot feature name, e.g. "observation.state"
+    topic: str
+    fields: list[str]  # dotted paths into the message; empty means the whole message
+    names_from: str | None = None  # field holding per-element names (e.g. JointState.name)
+    names: list[str] | None = None  # explicit names, overrides names_from
+
+
+@dataclass
+class Config:
+    fps: float
+    features: list[FeatureSpec]
+    task: str = ""
+    robot_type: str | None = None
+    sync: str = "hold"
+    max_staleness_s: float = 0.25
+    time_source: str = "header"
+    trim_to_overlap: bool = True
+    extra: dict = field(default_factory=dict)
+
+    def feature(self, key: str) -> FeatureSpec:
+        return next(f for f in self.features if f.key == key)
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def load_config(path: str | Path) -> Config:
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    return parse_config(data)
+
+
+def parse_config(data: dict) -> Config:
+    if "fps" not in data:
+        raise ConfigError("config needs 'fps' (the output frame rate)")
+    raw_features = data.get("features") or {}
+    if not raw_features:
+        raise ConfigError("config needs at least one entry under 'features'")
+
+    features = []
+    for key, spec in raw_features.items():
+        if not isinstance(spec, dict) or "topic" not in spec:
+            raise ConfigError(f"feature '{key}' needs a 'topic'")
+        if "field" in spec and "fields" in spec:
+            raise ConfigError(f"feature '{key}': use either 'field' or 'fields', not both")
+        fields = spec.get("fields")
+        if fields is None:
+            fields = [spec["field"]] if spec.get("field") else []
+        features.append(
+            FeatureSpec(
+                key=key,
+                topic=spec["topic"],
+                fields=list(fields),
+                names_from=spec.get("names_from"),
+                names=spec.get("names"),
+            )
+        )
+
+    sync = data.get("sync", {}) or {}
+    cfg = Config(
+        fps=float(data["fps"]),
+        features=features,
+        task=str(data.get("task", "")),
+        robot_type=data.get("robot_type"),
+        sync=sync.get("method", "hold"),
+        max_staleness_s=float(sync.get("max_staleness_s", 0.25)),
+        time_source=data.get("time_source", "header"),
+        trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
+    )
+    if cfg.fps <= 0:
+        raise ConfigError("'fps' must be positive")
+    if cfg.sync not in SYNC_METHODS:
+        raise ConfigError(f"sync.method must be one of {SYNC_METHODS}, got '{cfg.sync}'")
+    if cfg.time_source not in TIME_SOURCES:
+        raise ConfigError(f"time_source must be one of {TIME_SOURCES}, got '{cfg.time_source}'")
+    return cfg
