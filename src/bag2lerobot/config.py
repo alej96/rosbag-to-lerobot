@@ -18,6 +18,8 @@ class FeatureSpec:
     fields: list[str]  # dotted paths into the message; empty means the whole message
     names_from: str | None = None  # field holding per-element names (e.g. JointState.name)
     names: list[str] | None = None  # explicit names, overrides names_from
+    sync: str | None = None  # per-feature override of Config.sync
+    max_staleness_s: float | None = None  # per-feature override of Config.max_staleness_s
 
 
 @dataclass
@@ -61,6 +63,16 @@ def parse_config(data: dict) -> Config:
         fields = spec.get("fields")
         if fields is None:
             fields = [spec["field"]] if spec.get("field") else []
+        feat_sync = spec.get("sync")
+        if feat_sync is not None and feat_sync not in SYNC_METHODS:
+            raise ConfigError(
+                f"feature '{key}': sync must be one of {SYNC_METHODS}, got '{feat_sync}'"
+            )
+        feat_staleness = spec.get("max_staleness_s")
+        if feat_staleness is not None:
+            feat_staleness = float(feat_staleness)
+            if feat_staleness < 0:
+                raise ConfigError(f"feature '{key}': max_staleness_s must not be negative")
         features.append(
             FeatureSpec(
                 key=key,
@@ -68,6 +80,8 @@ def parse_config(data: dict) -> Config:
                 fields=list(fields),
                 names_from=spec.get("names_from"),
                 names=spec.get("names"),
+                sync=feat_sync,
+                max_staleness_s=feat_staleness,
             )
         )
 

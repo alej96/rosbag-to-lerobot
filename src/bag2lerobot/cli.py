@@ -76,7 +76,7 @@ def _convert(args) -> int:
             )
             if st.stale_frames:
                 any_stale = True
-                line += f"  !! {st.stale_frames} stale frame(s) > {cfg.max_staleness_s}s"
+                line += f"  !! {st.stale_frames} stale frame(s) > {st.max_staleness_s}s"
             print(line)
     if any_stale and args.strict:
         print("bag2lerobot: stale frames found (--strict)", file=sys.stderr)
