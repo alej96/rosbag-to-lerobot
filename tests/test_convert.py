@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from bag2lerobot.config import load_config
+from bag2lerobot.config import ConfigError, load_config
 from bag2lerobot.convert import convert
 from bag2lerobot.extract import ExtractError, extract_streams
 from tests.conftest import JOINTS, BagSpec, signal
@@ -106,6 +106,82 @@ def test_multiple_bags_become_episodes(make_bag, config_file, tmp_path):
     for _, group in data.groupby("episode_index"):
         assert list(group["frame_index"]) == list(range(len(group)))
         assert group["timestamp"].iloc[0] == 0
+
+
+PER_FEATURE_SYNC_CONFIG = """
+fps: 30
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+    sync: hold
+  action:
+    topic: /leader/joint_states
+    field: position
+    names_from: name
+sync:
+  method: linear
+"""
+
+
+def test_per_feature_sync_overrides_global(make_bag, tmp_path):
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(PER_FEATURE_SYNC_CONFIG)
+    out = tmp_path / "ds"
+    reports = convert([make_bag()], load_config(cfg_path), out)
+    _, data, _ = _read(out)
+    t = reports[0].sync.t0 - 1_700_000_000.0 + data["timestamp"].to_numpy()
+
+    # observation.state pins "hold" even though sync.method is "linear" globally.
+    state = np.stack(data["observation.state"])
+    assert np.abs(state - signal(t)).max() > 0.003
+    # action keeps the global "linear" method.
+    action = np.stack(data["action"])
+    assert np.abs(action - (signal(t) + 1.0)).max() < 1e-3
+
+
+PER_FEATURE_STALENESS_CONFIG = """
+fps: 30
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+  action:
+    topic: /leader/joint_states
+    field: position
+    names_from: name
+    max_staleness_s: 5.0
+"""
+
+
+def test_per_feature_max_staleness_overrides_global(make_bag, tmp_path):
+    bag = make_bag(spec=BagSpec(leader_gap=(1.0, 2.0)))
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(PER_FEATURE_STALENESS_CONFIG)
+    reports = convert([bag], load_config(cfg_path), tmp_path / "ds")
+
+    action = next(s for s in reports[0].sync.streams if s.key == "action")
+    assert action.max_staleness_s == 5.0
+    assert action.stale_frames == 0  # the lenient override absorbs the 1s gap
+
+    state = next(s for s in reports[0].sync.streams if s.key == "observation.state")
+    assert state.max_staleness_s == 0.25  # unaffected default
+
+
+def test_invalid_feature_sync_override_rejected(tmp_path):
+    cfg_path = tmp_path / "bad.yaml"
+    cfg_path.write_text("fps: 30\nfeatures:\n  action:\n    topic: /x\n    sync: nearest\n")
+    with pytest.raises(ConfigError, match="sync must be one of"):
+        load_config(cfg_path)
+
+
+def test_negative_feature_max_staleness_rejected(tmp_path):
+    cfg_path = tmp_path / "bad.yaml"
+    cfg_path.write_text("fps: 30\nfeatures:\n  action:\n    topic: /x\n    max_staleness_s: -1\n")
+    with pytest.raises(ConfigError, match="must not be negative"):
+        load_config(cfg_path)
 
 
 def test_missing_topic_lists_available(make_bag, tmp_path):

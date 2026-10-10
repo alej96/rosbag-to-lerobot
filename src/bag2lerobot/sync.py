@@ -18,6 +18,7 @@ class StreamReport:
     rate_hz: float
     max_gap_s: float
     stale_frames: int  # frames whose newest sample is older than max_staleness_s
+    max_staleness_s: float  # threshold used for this stream (may be a per-feature override)
 
 
 @dataclass
@@ -60,10 +61,18 @@ def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
     frames = int(np.floor((t1 - t0) / dt + 1e-9)) + 1
     grid = t0 + np.arange(frames) * dt
 
+    specs = {f.key: f for f in cfg.features}
     values, names, reports = {}, {}, []
     for key, s in streams.items():
+        spec = specs.get(key)
+        method = (spec.sync if spec and spec.sync else None) or cfg.sync
+        staleness = (
+            spec.max_staleness_s
+            if spec and spec.max_staleness_s is not None
+            else cfg.max_staleness_s
+        )
         idx = np.clip(np.searchsorted(s.times, grid, side="right") - 1, 0, len(s.times) - 1)
-        if cfg.sync == "linear" and len(s.times) > 1:
+        if method == "linear" and len(s.times) > 1:
             out = np.column_stack(
                 [np.interp(grid, s.times, s.values[:, d]) for d in range(s.values.shape[1])]
             )
@@ -71,7 +80,7 @@ def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
             out = s.values[idx]
         age = grid - s.times[idx]
         # before a stream's first sample (only possible without trimming) is also stale
-        stale = int(((age > cfg.max_staleness_s) | (grid < s.times[0])).sum())
+        stale = int(((age > staleness) | (grid < s.times[0])).sum())
         gaps = np.diff(s.times)
         reports.append(
             StreamReport(
@@ -83,6 +92,7 @@ def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
                 else 0.0,
                 max_gap_s=float(gaps.max()) if len(gaps) else 0.0,
                 stale_frames=stale,
+                max_staleness_s=staleness,
             )
         )
         values[key] = out.astype(np.float32)
