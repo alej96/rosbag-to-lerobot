@@ -10,7 +10,9 @@ one small YAML file.
 - Reads ROS 1 and ROS 2 (sqlite3 and MCAP) bags without a ROS install (via
   [`rosbags`](https://gitlab.com/ternaris/rosbags))
 - Resamples every topic onto one fixed-rate grid (`hold` or `linear`) and reports stale
-  frames and gaps per stream instead of hiding them
+  frames and gaps per stream instead of hiding them; a feature can override the sync
+  method and staleness threshold (e.g. `hold` for a discrete gripper command while joint
+  positions use `linear`)
 - Uses header stamps by default, trims each episode to the window where all topics have
   data, and keeps joint order stable when a driver reorders `JointState`
 - Flattens nested messages (`pose.position`, `pose.orientation`) into named columns

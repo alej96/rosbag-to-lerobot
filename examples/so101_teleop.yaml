@@ -14,6 +14,11 @@ features:
   observation.ee_pose:
     topic: /ee_pose          # geometry_msgs/PoseStamped
     fields: [pose.position, pose.orientation]
+  gripper_cmd:
+    topic: /leader/gripper_cmd
+    field: data
+    sync: hold               # per-feature override: never interpolate a discrete command
+    max_staleness_s: 0.5     # per-feature override: tolerate a slower gripper publisher
 sync:
   method: hold              # hold = latest sample (causal); linear = interpolate
   max_staleness_s: 0.25     # frames using older data are reported as stale
