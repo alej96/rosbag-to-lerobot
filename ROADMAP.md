@@ -20,7 +20,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       first conversion quick.
 - [ ] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
       writes a dataset card (source bags, sync stats, config used).
-- [ ] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
+- [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [ ] **Large bags.** Stream extraction and write data files in chunks
       (`data_files_size_in_mb`) instead of holding everything in memory.
@@ -42,3 +42,5 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   feature mapping (dotted fields, nested messages, names_from with stable joint order);
   hold/linear sync with stale-frame and gap reports; LeRobot v3.0 writer (data, episodes,
   tasks, stats). Output verified to load in lerobot 0.6.1.
+- 2026-10-10: Per-feature `sync`/`max_staleness_s` overrides, so e.g. a discrete gripper
+  command can stay `hold` while joint positions use `linear` in the same config.
