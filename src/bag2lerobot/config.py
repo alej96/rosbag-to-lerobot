@@ -9,6 +9,7 @@ import yaml
 
 SYNC_METHODS = ("hold", "linear")
 TIME_SOURCES = ("header", "bag")
+FEATURE_TYPES = ("numeric", "image")
 
 
 @dataclass
@@ -20,6 +21,7 @@ class FeatureSpec:
     names: list[str] | None = None  # explicit names, overrides names_from
     sync: str | None = None  # per-feature override of Config.sync
     max_staleness_s: float | None = None  # per-feature override of Config.max_staleness_s
+    type: str = "numeric"  # "numeric" or "image" (sensor_msgs/Image or CompressedImage -> video)
 
 
 @dataclass
@@ -58,6 +60,11 @@ def parse_config(data: dict) -> Config:
     for key, spec in raw_features.items():
         if not isinstance(spec, dict) or "topic" not in spec:
             raise ConfigError(f"feature '{key}' needs a 'topic'")
+        feat_type = spec.get("type", "numeric")
+        if feat_type not in FEATURE_TYPES:
+            raise ConfigError(
+                f"feature '{key}': type must be one of {FEATURE_TYPES}, got '{feat_type}'"
+            )
         if "field" in spec and "fields" in spec:
             raise ConfigError(f"feature '{key}': use either 'field' or 'fields', not both")
         fields = spec.get("fields")
@@ -73,6 +80,11 @@ def parse_config(data: dict) -> Config:
             feat_staleness = float(feat_staleness)
             if feat_staleness < 0:
                 raise ConfigError(f"feature '{key}': max_staleness_s must not be negative")
+        if feat_type == "image":
+            if fields or spec.get("names_from") or spec.get("names"):
+                raise ConfigError(f"feature '{key}': image features don't support fields/names")
+            if feat_sync is not None and feat_sync != "hold":
+                raise ConfigError(f"feature '{key}': image features only support sync 'hold'")
         features.append(
             FeatureSpec(
                 key=key,
@@ -82,6 +94,7 @@ def parse_config(data: dict) -> Config:
                 names=spec.get("names"),
                 sync=feat_sync,
                 max_staleness_s=feat_staleness,
+                type=feat_type,
             )
         )
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from bag2lerobot.config import Config
-from bag2lerobot.extract import Stream
+from bag2lerobot.extract import ImageStream, Stream
 
 
 @dataclass
@@ -30,6 +30,7 @@ class SyncResult:
     streams: list[StreamReport] = field(default_factory=list)
     trimmed_start_s: float = 0.0
     trimmed_end_s: float = 0.0
+    images: dict[str, list] = field(default_factory=dict)  # key -> one frame per output row
 
     @property
     def stale_frames(self) -> int:
@@ -40,21 +41,31 @@ class SyncError(ValueError):
     pass
 
 
-def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
+def synchronize(
+    streams: dict[str, Stream],
+    cfg: Config,
+    image_streams: dict[str, ImageStream] | None = None,
+) -> SyncResult:
     """Sample every stream at ``cfg.fps`` over the window where all of them have data.
 
     Frames are evenly spaced (timestamp = frame_index / fps), which is what LeRobot's
     loader requires. Gaps inside a stream are filled (hold or linear) and counted as
-    stale frames rather than silently dropped.
+    stale frames rather than silently dropped. Image streams are always held (the most
+    recent decoded frame) rather than interpolated.
     """
-    starts = [s.times[0] for s in streams.values()]
-    ends = [s.times[-1] for s in streams.values()]
+    image_streams = image_streams or {}
+    all_times = [s.times for s in streams.values()] + [s.times for s in image_streams.values()]
+    starts = [t[0] for t in all_times]
+    ends = [t[-1] for t in all_times]
     earliest, latest = min(starts), max(ends)
     t0, t1 = (max(starts), min(ends)) if cfg.trim_to_overlap else (earliest, latest)
     if t1 <= t0:
         raise SyncError(
             "streams don't overlap in time: "
-            + ", ".join(f"{s.key} [{s.times[0]:.2f}, {s.times[-1]:.2f}]s" for s in streams.values())
+            + ", ".join(
+                f"{s.key} [{s.times[0]:.2f}, {s.times[-1]:.2f}]s"
+                for s in (*streams.values(), *image_streams.values())
+            )
         )
 
     dt = 1.0 / cfg.fps
@@ -98,6 +109,33 @@ def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
         values[key] = out.astype(np.float32)
         names[key] = s.names
 
+    images: dict[str, list] = {}
+    for key, s in image_streams.items():
+        spec = specs.get(key)
+        staleness = (
+            spec.max_staleness_s
+            if spec and spec.max_staleness_s is not None
+            else cfg.max_staleness_s
+        )
+        idx = np.clip(np.searchsorted(s.times, grid, side="right") - 1, 0, len(s.times) - 1)
+        age = grid - s.times[idx]
+        stale = int(((age > staleness) | (grid < s.times[0])).sum())
+        gaps = np.diff(s.times)
+        reports.append(
+            StreamReport(
+                key=key,
+                topic=s.topic,
+                messages=len(s.times),
+                rate_hz=(len(s.times) - 1) / (s.times[-1] - s.times[0])
+                if s.times[-1] > s.times[0]
+                else 0.0,
+                max_gap_s=float(gaps.max()) if len(gaps) else 0.0,
+                stale_frames=stale,
+                max_staleness_s=staleness,
+            )
+        )
+        images[key] = [s.frames[i] for i in idx]
+
     return SyncResult(
         t0=t0,
         frames=frames,
@@ -106,4 +144,5 @@ def synchronize(streams: dict[str, Stream], cfg: Config) -> SyncResult:
         streams=reports,
         trimmed_start_s=t0 - earliest,
         trimmed_end_s=latest - t1,
+        images=images,
     )

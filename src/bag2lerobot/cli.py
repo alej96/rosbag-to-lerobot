@@ -41,7 +41,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect":
             return _inspect(args)
         return _convert(args)
-    except (ConfigError, ExtractError, SyncError, FileExistsError, FileNotFoundError) as exc:
+    except (
+        ConfigError,
+        ExtractError,
+        SyncError,
+        ValueError,
+        FileExistsError,
+        FileNotFoundError,
+    ) as exc:
         print(f"bag2lerobot: {exc}", file=sys.stderr)
         return 2
 
