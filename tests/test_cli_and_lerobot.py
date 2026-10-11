@@ -46,3 +46,41 @@ def test_output_loads_in_lerobot(make_bag, config_file, tmp_path):
     assert tuple(item["action"].shape) == (3,)
     assert tuple(item["observation.ee_pose"].shape) == (7,)
     assert item["task"] == "pick the cube"
+
+
+IMAGE_CONFIG = """
+fps: 10
+task: pick the cube
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+  observation.images.cam:
+    topic: /cam/image_raw
+    type: image
+"""
+
+
+@pytest.mark.lerobot
+def test_image_feature_loads_in_lerobot(make_bag, tmp_path):
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(IMAGE_CONFIG)
+    bags = [
+        make_bag(spec=BagSpec(seconds=1.0, camera_hz=10, seed=1), name="a"),
+        make_bag(spec=BagSpec(seconds=1.0, camera_hz=10, seed=2), name="b"),
+    ]
+    out = tmp_path / "ds"
+    assert main(["convert", *map(str, bags), "-c", str(cfg_path), "-o", str(out)]) == 0
+
+    # pyav avoids torchcodec, whose compiled ABI is sensitive to the exact torch/ffmpeg
+    # build on the runner; pyav is the other officially supported LeRobotDataset backend.
+    ds = lerobot_dataset.LeRobotDataset(
+        "local/bag2lerobot-video-test", root=out, video_backend="pyav"
+    )
+    assert ds.num_episodes == 2
+    item = ds[0]
+    assert tuple(item["observation.images.cam"].shape) == (3, 6, 8)
+    last = ds[len(ds) - 1]
+    assert tuple(last["observation.images.cam"].shape) == (3, 6, 8)
