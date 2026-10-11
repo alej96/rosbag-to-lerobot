@@ -25,6 +25,27 @@ class Stream:
 
 
 @dataclass
+class ImageStream:
+    """All frames of one image feature: times in seconds and decoded RGB uint8 frames."""
+
+    key: str
+    topic: str
+    times: np.ndarray
+    frames: list[np.ndarray]  # each (H, W, 3) uint8, RGB
+
+
+# numpy dtype/channel layout for raw sensor_msgs/Image encodings we can decode without a
+# compressed-image codec. Values are (channels, is_bgr).
+_RAW_ENCODINGS = {
+    "rgb8": (3, False),
+    "bgr8": (3, True),
+    "rgba8": (4, False),
+    "bgra8": (4, True),
+    "mono8": (1, False),
+}
+
+
+@dataclass
 class TopicInfo:
     topic: str
     msgtype: str
@@ -72,13 +93,12 @@ def extract_streams(
     (e.g. JointState joints) keep the same column order in every episode.
     """
     joint_order = {} if joint_order is None else joint_order
+    specs = [s for s in cfg.features if s.type == "numeric"]
     by_topic: dict[str, list[FeatureSpec]] = {}
-    for spec in cfg.features:
+    for spec in specs:
         by_topic.setdefault(spec.topic, []).append(spec)
 
-    samples: dict[str, tuple[list[float], list[np.ndarray]]] = {
-        s.key: ([], []) for s in cfg.features
-    }
+    samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
     names: dict[str, list[str]] = {}
     with _reader(Path(path)) as reader:
         available = {c.topic for c in reader.connections}
@@ -105,7 +125,7 @@ def extract_streams(
                 names.setdefault(spec.key, vec_names)
 
     streams = {}
-    for spec in cfg.features:
+    for spec in specs:
         times, values = samples[spec.key]
         if not values:
             raise ExtractError(f"{path}: no messages on {spec.topic} for '{spec.key}'")
@@ -114,6 +134,77 @@ def extract_streams(
         order = np.argsort(t, kind="stable")
         streams[spec.key] = Stream(spec.key, spec.topic, t[order], v[order], names[spec.key])
     return streams
+
+
+def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStream]:
+    """Decode every configured image feature from one bag into RGB frames."""
+    specs = [s for s in cfg.features if s.type == "image"]
+    if not specs:
+        return {}
+    by_topic: dict[str, list[FeatureSpec]] = {}
+    for spec in specs:
+        by_topic.setdefault(spec.topic, []).append(spec)
+
+    samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
+    with _reader(Path(path)) as reader:
+        available = {c.topic for c in reader.connections}
+        missing = sorted(set(by_topic) - available)
+        if missing:
+            raise ExtractError(
+                f"{path}: topic(s) not in bag: {', '.join(missing)} "
+                f"(available: {', '.join(sorted(available))})"
+            )
+        conns = [c for c in reader.connections if c.topic in by_topic]
+        for conn, bag_t, raw in reader.messages(connections=conns):
+            msg = reader.deserialize(raw, conn.msgtype)
+            t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
+            frame = _decode_image(msg)
+            for spec in by_topic[conn.topic]:
+                times, frames = samples[spec.key]
+                times.append(t)
+                frames.append(frame)
+
+    streams = {}
+    for spec in specs:
+        times, frames = samples[spec.key]
+        if not frames:
+            raise ExtractError(f"{path}: no messages on {spec.topic} for '{spec.key}'")
+        t = np.asarray(times, dtype=np.float64)
+        order = np.argsort(t, kind="stable")
+        streams[spec.key] = ImageStream(spec.key, spec.topic, t[order], [frames[i] for i in order])
+    return streams
+
+
+def _decode_image(msg) -> np.ndarray:
+    """Decode a sensor_msgs/Image or CompressedImage message into an (H, W, 3) RGB array."""
+    msgtype = getattr(msg, "__msgtype__", "")
+    if msgtype.endswith("CompressedImage"):
+        try:
+            from PIL import Image as PILImage
+        except ImportError as exc:
+            raise ExtractError(
+                "decoding CompressedImage needs the 'video' extra: pip install 'bag2lerobot[video]'"
+            ) from exc
+        import io
+
+        with PILImage.open(io.BytesIO(bytes(msg.data))) as img:
+            return np.array(img.convert("RGB"))
+    if msgtype.endswith("Image"):
+        channels, is_bgr = _RAW_ENCODINGS.get(msg.encoding, (None, None))
+        if channels is None:
+            raise ExtractError(
+                f"unsupported image encoding '{msg.encoding}' (supported: "
+                f"{', '.join(_RAW_ENCODINGS)}, or publish CompressedImage)"
+            )
+        data = np.asarray(msg.data, dtype=np.uint8)
+        rows = data[: msg.height * msg.step].reshape(msg.height, msg.step)
+        frame = rows[:, : msg.width * channels].reshape(msg.height, msg.width, channels)
+        if channels == 1:
+            return np.repeat(frame, 3, axis=2)
+        if channels == 4:
+            frame = frame[..., :3]
+        return frame[..., ::-1] if is_bgr else frame
+    raise ExtractError(f"'{msgtype}' is not an image message type")
 
 
 def _stamp(msg, bag_t: int) -> float:

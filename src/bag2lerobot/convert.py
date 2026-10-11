@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bag2lerobot.config import Config
-from bag2lerobot.extract import extract_streams
+from bag2lerobot.extract import extract_image_streams, extract_streams
 from bag2lerobot.sync import SyncResult, synchronize
 from bag2lerobot.writer import Episode, write_dataset
 
@@ -32,7 +32,8 @@ def convert(
     episodes, reports = [], []
     for bag in bags:
         streams = extract_streams(bag, cfg, joint_order)
-        result = synchronize(streams, cfg)
+        image_streams = extract_image_streams(bag, cfg)
+        result = synchronize(streams, cfg, image_streams)
         episodes.append(Episode(result, cfg.task))
         reports.append(ConversionReport(Path(bag), result))
     write_dataset(out, episodes, cfg.fps, cfg.robot_type)

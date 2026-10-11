@@ -27,7 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+video = ["av>=11", "pillow>=10"]
+dev = ["pytest>=8", "ruff>=0.6", "av>=11", "pillow>=10"]
 
 [project.scripts]
 bag2lerobot = "bag2lerobot.cli:main"

@@ -19,6 +19,9 @@ features:
     field: data
     sync: hold               # per-feature override: never interpolate a discrete command
     max_staleness_s: 0.5     # per-feature override: tolerate a slower gripper publisher
+  observation.images.wrist:
+    topic: /wrist_cam/image_raw   # sensor_msgs/Image or CompressedImage -> MP4 video
+    type: image                  # needs the 'video' extra: pip install bag2lerobot[video]
 sync:
   method: hold              # hold = latest sample (causal); linear = interpolate
   max_staleness_s: 0.25     # frames using older data are reported as stale

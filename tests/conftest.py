@@ -34,6 +34,9 @@ class BagSpec:
     jitter_s: float = 0.002
     seed: int = 0
     extra_topics: dict[str, float] = field(default_factory=dict)
+    camera_hz: float = 0.0  # > 0 publishes /cam/image_raw (sensor_msgs/Image, rgb8)
+    camera_size: tuple[int, int] = (8, 6)  # (width, height)
+    compressed_camera_hz: float = 0.0  # > 0 publishes /cam/image_compressed (jpeg)
 
 
 def _times(hz: float, start: float, end: float, jitter: float, rng) -> np.ndarray:
@@ -83,6 +86,39 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
             ),
         )
 
+    def frame(t: float) -> np.ndarray:
+        """Deterministic (H, W, 3) RGB frame: red ramps with t, green/blue are fixed."""
+        w, h = spec.camera_size
+        red = int(round((t / spec.seconds) * 255)) if spec.seconds else 0
+        img = np.zeros((h, w, 3), dtype=np.uint8)
+        img[..., 0] = np.clip(red, 0, 255)
+        img[..., 1] = 60
+        img[..., 2] = 180
+        return img
+
+    def image_msg(t: float):
+        w, h = spec.camera_size
+        data = np.ascontiguousarray(frame(t).reshape(-1), dtype=np.uint8)
+        return T["sensor_msgs/msg/Image"](
+            header=header(t),
+            height=h,
+            width=w,
+            encoding="rgb8",
+            is_bigendian=0,
+            step=w * 3,
+            data=data,
+        )
+
+    def compressed_image_msg(t: float):
+        import io
+
+        from PIL import Image as PILImage
+
+        buf = io.BytesIO()
+        PILImage.fromarray(frame(t)).save(buf, format="JPEG")
+        data = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+        return T["sensor_msgs/msg/CompressedImage"](header=header(t), format="jpeg", data=data)
+
     msgs = []  # (t, topic, msgtype, msg)
     for i, t in enumerate(_times(spec.follower_hz, 0, spec.seconds, spec.jitter_s, rng)):
         rev = bool(spec.shuffle_joints_every) and i % spec.shuffle_joints_every == 1
@@ -97,6 +133,19 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
         )
     for t in _times(spec.pose_hz, 0, spec.seconds, spec.jitter_s, rng):
         msgs.append((t, "/ee_pose", "geometry_msgs/msg/PoseStamped", pose(t)))
+    if spec.camera_hz > 0:
+        for t in _times(spec.camera_hz, 0, spec.seconds, spec.jitter_s, rng):
+            msgs.append((t, "/cam/image_raw", "sensor_msgs/msg/Image", image_msg(t)))
+    if spec.compressed_camera_hz > 0:
+        for t in _times(spec.compressed_camera_hz, 0, spec.seconds, spec.jitter_s, rng):
+            msgs.append(
+                (
+                    t,
+                    "/cam/image_compressed",
+                    "sensor_msgs/msg/CompressedImage",
+                    compressed_image_msg(t),
+                )
+            )
     msgs.sort(key=lambda m: m[0])
 
     if kind == "ros1":
