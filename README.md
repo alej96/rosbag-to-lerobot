@@ -16,6 +16,9 @@ one small YAML file.
 - Uses header stamps by default, trims each episode to the window where all topics have
   data, and keeps joint order stable when a driver reorders `JointState`
 - Flattens nested messages (`pose.position`, `pose.orientation`) into named columns
+- Maps `sensor_msgs/Image` and `CompressedImage` topics to `observation.images.*` video
+  features: frames are held on the same frame grid as everything else and encoded to MP4
+  (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
 
 ## Install
@@ -23,6 +26,10 @@ one small YAML file.
 ```bash
 pip install git+https://github.com/alej96/rosbag-to-lerobot
 ```
+
+Add `[video]` (e.g. `pip install "bag2lerobot[video] @ git+..."`) to convert image topics to
+video features; without it, configs with an image feature raise a clear error telling you
+to install it.
 
 ## Usage
 
@@ -33,7 +40,8 @@ bag2lerobot convert run*/ -c cfg.yaml -o ./ds --strict   # fail on stale frames
 ```
 
 Each bag becomes one episode. See [examples/so101_teleop.yaml](examples/so101_teleop.yaml)
-for the config format. Images and video are not converted yet (see the roadmap).
+for the config format, including an `observation.images.*` feature (`type: image`) that
+maps a camera topic to video.
 
 ## Development
 

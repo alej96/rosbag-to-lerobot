@@ -7,11 +7,12 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 
 ## Next up
 
-- [ ] **Images to video.** Map `sensor_msgs/Image` and `CompressedImage` topics to
-      `observation.images.*` video features: decode, sample on the frame grid, encode
-      to MP4 (AV1 or H.264 via PyAV behind an optional `[video]` extra), and write
+- [x] **Images to video.** Map `sensor_msgs/Image` and `CompressedImage` topics to
+      `observation.images.*` video features: decode, hold-sample on the frame grid,
+      encode to MP4 (H.264 via PyAV behind the optional `[video]` extra), and write
       `videos/...` paths plus the per-episode `from_timestamp`/`to_timestamp` metadata.
-      This is the most-requested missing piece.
+      Follow-ups: an AV1 codec option, and chunking large videos (currently one file per
+      camera, covered by the "Large bags" item below).
 - [ ] **Episode splitting inside one bag.** Many logs hold many demos in one file. Split
       on a topic (e.g. `/episode_start` std_msgs/Bool or Empty), on time ranges from a
       CSV, or on idle gaps, with a `--dry-run` that prints the boundaries.
@@ -44,3 +45,6 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   tasks, stats). Output verified to load in lerobot 0.6.1.
 - 2026-10-10: Per-feature `sync`/`max_staleness_s` overrides, so e.g. a discrete gripper
   command can stay `hold` while joint positions use `linear` in the same config.
+- 2026-10-11: `observation.images.*` video features (`type: image`) decode
+  `sensor_msgs/Image`/`CompressedImage`, hold-sample onto the frame grid and encode to
+  MP4 via the optional `[video]` extra.
