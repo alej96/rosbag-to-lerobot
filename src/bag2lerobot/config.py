@@ -34,6 +34,7 @@ class Config:
     max_staleness_s: float = 0.25
     time_source: str = "header"
     trim_to_overlap: bool = True
+    split_on: str | None = None  # topic whose messages mark episode-start boundaries
     extra: dict = field(default_factory=dict)
 
     def feature(self, key: str) -> FeatureSpec:
@@ -99,6 +100,9 @@ def parse_config(data: dict) -> Config:
         )
 
     sync = data.get("sync", {}) or {}
+    split_on = data.get("split_on")
+    if split_on is not None and not isinstance(split_on, str):
+        raise ConfigError("'split_on' must be a topic name (string)")
     cfg = Config(
         fps=float(data["fps"]),
         features=features,
@@ -108,6 +112,7 @@ def parse_config(data: dict) -> Config:
         max_staleness_s=float(sync.get("max_staleness_s", 0.25)),
         time_source=data.get("time_source", "header"),
         trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
+        split_on=split_on or None,
     )
     if cfg.fps <= 0:
         raise ConfigError("'fps' must be positive")

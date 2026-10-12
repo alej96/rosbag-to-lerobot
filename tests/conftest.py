@@ -37,6 +37,8 @@ class BagSpec:
     camera_hz: float = 0.0  # > 0 publishes /cam/image_raw (sensor_msgs/Image, rgb8)
     camera_size: tuple[int, int] = (8, 6)  # (width, height)
     compressed_camera_hz: float = 0.0  # > 0 publishes /cam/image_compressed (jpeg)
+    episode_starts: list[float] = field(default_factory=list)  # /episode_start times (s)
+    episode_start_type: str = "bool"  # "bool" (std_msgs/Bool, data=True) or "empty"
 
 
 def _times(hz: float, start: float, end: float, jitter: float, rng) -> np.ndarray:
@@ -146,6 +148,12 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
                     compressed_image_msg(t),
                 )
             )
+    if spec.episode_starts:
+        is_bool = spec.episode_start_type == "bool"
+        msgtype = "std_msgs/msg/Bool" if is_bool else "std_msgs/msg/Empty"
+        for t in spec.episode_starts:
+            msg = T[msgtype](data=True) if is_bool else T[msgtype]()
+            msgs.append((t, "/episode_start", msgtype, msg))
     msgs.sort(key=lambda m: m[0])
 
     if kind == "ros1":

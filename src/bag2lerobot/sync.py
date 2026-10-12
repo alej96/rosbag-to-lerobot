@@ -45,13 +45,16 @@ def synchronize(
     streams: dict[str, Stream],
     cfg: Config,
     image_streams: dict[str, ImageStream] | None = None,
+    window: tuple[float, float] | None = None,
 ) -> SyncResult:
     """Sample every stream at ``cfg.fps`` over the window where all of them have data.
 
     Frames are evenly spaced (timestamp = frame_index / fps), which is what LeRobot's
     loader requires. Gaps inside a stream are filled (hold or linear) and counted as
     stale frames rather than silently dropped. Image streams are always held (the most
-    recent decoded frame) rather than interpolated.
+    recent decoded frame) rather than interpolated. ``window``, when given, further
+    restricts the frame grid to ``[window[0], window[1])`` (e.g. one episode split out of
+    a longer bag via ``cfg.split_on``); ``window[1]`` may be ``float("inf")``.
     """
     image_streams = image_streams or {}
     all_times = [s.times for s in streams.values()] + [s.times for s in image_streams.values()]
@@ -59,7 +62,12 @@ def synchronize(
     ends = [t[-1] for t in all_times]
     earliest, latest = min(starts), max(ends)
     t0, t1 = (max(starts), min(ends)) if cfg.trim_to_overlap else (earliest, latest)
+    if window is not None:
+        t0, t1 = max(t0, window[0]), min(t1, window[1])
     if t1 <= t0:
+        if window is not None:
+            end = "end" if window[1] == float("inf") else f"{window[1]:.3f}s"
+            raise SyncError(f"no overlapping data in episode window [{window[0]:.3f}s, {end})")
         raise SyncError(
             "streams don't overlap in time: "
             + ", ".join(

@@ -175,6 +175,34 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
     return streams
 
 
+def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
+    """Episode-start timestamps (s) from messages on ``topic``.
+
+    A ``std_msgs/Bool`` message starts a new episode only on a rising edge (``data``
+    True); any other message type (e.g. ``std_msgs/Empty``) starts a new episode on
+    every message. Each boundary marks where one episode ends and the next begins; data
+    before the first boundary belongs to no episode and is dropped.
+    """
+    with _reader(Path(path)) as reader:
+        conns = [c for c in reader.connections if c.topic == topic]
+        if not conns:
+            available = sorted({c.topic for c in reader.connections})
+            raise ExtractError(
+                f"{path}: split topic '{topic}' not in bag (available: {', '.join(available)})"
+            )
+        is_bool = conns[0].msgtype.endswith("Bool")
+        times = []
+        for conn, bag_t, raw in reader.messages(connections=conns):
+            msg = reader.deserialize(raw, conn.msgtype)
+            if is_bool and not bool(msg.data):
+                continue
+            t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
+            times.append(t)
+    if not times:
+        raise ExtractError(f"{path}: no episode-start messages found on '{topic}'")
+    return sorted(times)
+
+
 def _decode_image(msg) -> np.ndarray:
     """Decode a sensor_msgs/Image or CompressedImage message into an (H, W, 3) RGB array."""
     msgtype = getattr(msg, "__msgtype__", "")
