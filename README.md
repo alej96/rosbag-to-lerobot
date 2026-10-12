@@ -19,6 +19,8 @@ one small YAML file.
 - Maps `sensor_msgs/Image` and `CompressedImage` topics to `observation.images.*` video
   features: frames are held on the same frame grid as everything else and encoded to MP4
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
+- Splits one bag with many demos into multiple episodes on a topic (`split_on`), with
+  `convert --dry-run` to preview the boundaries before writing anything
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
 
 ## Install
@@ -42,6 +44,25 @@ bag2lerobot convert run*/ -c cfg.yaml -o ./ds --strict   # fail on stale frames
 Each bag becomes one episode. See [examples/so101_teleop.yaml](examples/so101_teleop.yaml)
 for the config format, including an `observation.images.*` feature (`type: image`) that
 maps a camera topic to video.
+
+### Splitting many demos out of one bag
+
+If a bag holds several demonstrations recorded back to back, set `split_on` in the config
+to a topic that marks each demo's start, e.g. a `std_msgs/Bool` (only `data: true`
+messages count, so you can publish `false` to mark an end without splitting on it) or
+`std_msgs/Empty` published once per demo:
+
+```yaml
+split_on: /episode_start
+```
+
+Every bag is then split into one episode per boundary, from that message's timestamp up
+to the next one (or the end of the bag for the last one); data before the first boundary
+is dropped. Preview the boundaries before converting anything:
+
+```bash
+bag2lerobot convert run1.bag -c cfg.yaml --dry-run
+```
 
 ## Development
 

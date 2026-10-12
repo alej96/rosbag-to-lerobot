@@ -13,9 +13,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       `videos/...` paths plus the per-episode `from_timestamp`/`to_timestamp` metadata.
       Follow-ups: an AV1 codec option, and chunking large videos (currently one file per
       camera, covered by the "Large bags" item below).
-- [ ] **Episode splitting inside one bag.** Many logs hold many demos in one file. Split
-      on a topic (e.g. `/episode_start` std_msgs/Bool or Empty), on time ranges from a
-      CSV, or on idle gaps, with a `--dry-run` that prints the boundaries.
+- [x] **Episode splitting on a topic.** Many logs hold many demos in one file. A
+      `split_on` config topic (e.g. `/episode_start` std_msgs/Bool rising edge, or Empty)
+      marks each episode boundary, and `convert --dry-run` previews the boundaries
+      without writing. Follow-up below covers the other two splitting sources from the
+      original item (CSV time ranges, idle gaps).
 - [ ] **`bag2lerobot init`** generates a starter YAML from `inspect` (JointState topics
       become state and action candidates, image topics become cameras) to make the
       first conversion quick.
@@ -32,6 +34,9 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       `docs/validated-bags.md`.
 - [ ] **Custom message types** from `.msg` files (`--msg-dir`) for ROS 1/2 bags recorded
       without embedded definitions.
+- [ ] **Episode splitting on time ranges or idle gaps.** Split a bag into episodes from a
+      CSV of time ranges, or automatically on idle gaps between demos, reusing the
+      `split_on`/`--dry-run` machinery added for topic-based splitting.
 
 ## Needs the owner
 
@@ -48,3 +53,6 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 - 2026-10-11: `observation.images.*` video features (`type: image`) decode
   `sensor_msgs/Image`/`CompressedImage`, hold-sample onto the frame grid and encode to
   MP4 via the optional `[video]` extra.
+- 2026-10-12: `split_on` config topic splits one bag with many demos into multiple
+  episodes (rising-edge `std_msgs/Bool` or every `std_msgs/Empty` message marks a
+  boundary); `convert --dry-run` previews the boundaries first.
