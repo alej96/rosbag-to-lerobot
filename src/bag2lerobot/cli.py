@@ -8,7 +8,7 @@ from pathlib import Path
 
 from bag2lerobot import __version__
 from bag2lerobot.config import ConfigError, load_config
-from bag2lerobot.convert import convert
+from bag2lerobot.convert import convert, preview_splits
 from bag2lerobot.extract import ExtractError, inspect_bag
 from bag2lerobot.sync import SyncError
 
@@ -26,11 +26,16 @@ def _parser() -> argparse.ArgumentParser:
     conv = sub.add_parser("convert", help="convert bags into a LeRobot dataset")
     conv.add_argument("bags", type=Path, nargs="+", help="one episode per bag")
     conv.add_argument("--config", "-c", type=Path, required=True, help="YAML feature mapping")
-    conv.add_argument("--out", "-o", type=Path, required=True, help="output dataset directory")
+    conv.add_argument("--out", "-o", type=Path, help="output dataset directory")
     conv.add_argument("--task", help="task description (overrides the config)")
     conv.add_argument("--overwrite", action="store_true", help="replace an existing output dir")
     conv.add_argument(
         "--strict", action="store_true", help="fail if any frame had to use stale data"
+    )
+    conv.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the episode boundaries from the config's 'split_on' topic and exit",
     )
     return p
 
@@ -62,18 +67,36 @@ def _inspect(args) -> int:
     return 0
 
 
+def _dry_run(args, cfg) -> int:
+    if not cfg.split_on:
+        print("bag2lerobot: --dry-run needs 'split_on' in the config", file=sys.stderr)
+        return 2
+    for bag, boundaries in preview_splits(args.bags, cfg).items():
+        print(f"{bag.name}: {len(boundaries)} episode(s) on '{cfg.split_on}'")
+        for i, start in enumerate(boundaries):
+            end = f"{boundaries[i + 1]:.3f}s" if i + 1 < len(boundaries) else "end"
+            print(f"  ep {i}: {start:.3f}s -> {end}")
+    return 0
+
+
 def _convert(args) -> int:
     cfg = load_config(args.config)
     if args.task:
         cfg.task = args.task
+    if args.dry_run:
+        return _dry_run(args, cfg)
+    if not args.out:
+        print("bag2lerobot: --out is required (unless --dry-run)", file=sys.stderr)
+        return 2
     reports = convert(args.bags, cfg, args.out, overwrite=args.overwrite)
     total = sum(r.sync.frames for r in reports)
     print(f"wrote {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
     any_stale = False
     for i, r in enumerate(reports):
         s = r.sync
+        label = r.bag.name if not cfg.split_on else f"{r.bag.name} seg {r.segment}"
         print(
-            f"  ep {i}: {r.bag.name}  {s.frames} frames  "
+            f"  ep {i}: {label}  {s.frames} frames  "
             f"(trimmed {s.trimmed_start_s:.2f}s start, {s.trimmed_end_s:.2f}s end)"
         )
         for st in s.streams:
