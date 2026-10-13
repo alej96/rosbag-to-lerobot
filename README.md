@@ -21,6 +21,8 @@ one small YAML file.
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
 - Splits one bag with many demos into multiple episodes on a topic (`split_on`), with
   `convert --dry-run` to preview the boundaries before writing anything
+- `bag2lerobot init` writes a starter config from a bag's topics, so the first
+  conversion doesn't start from a blank YAML file
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
 
 ## Install
@@ -37,6 +39,7 @@ to install it.
 
 ```bash
 bag2lerobot inspect my_run.mcap_dir/          # topics, types, counts, rates
+bag2lerobot init my_run.mcap_dir/ -o cfg.yaml # starter config from the bag's topics
 bag2lerobot convert run1/ run2/ run3.bag -c examples/so101_teleop.yaml -o ./my_dataset
 bag2lerobot convert run*/ -c cfg.yaml -o ./ds --strict   # fail on stale frames
 ```
@@ -44,6 +47,19 @@ bag2lerobot convert run*/ -c cfg.yaml -o ./ds --strict   # fail on stale frames
 Each bag becomes one episode. See [examples/so101_teleop.yaml](examples/so101_teleop.yaml)
 for the config format, including an `observation.images.*` feature (`type: image`) that
 maps a camera topic to video.
+
+### Generating a starter config
+
+`bag2lerobot init` looks at one bag's topics and writes a config to get a first
+conversion running: `JointState` topics become `observation.state`/`action` candidates
+(picked by name, e.g. "leader"/"follower" or "cmd"/"state"; topic order breaks ties),
+and `Image`/`CompressedImage` topics become `observation.images.*` video features. Edit
+the result before converting: fill in `task`, and double-check any feature commented
+`# check` — those are guesses `init` couldn't confirm from topic names alone.
+
+```bash
+bag2lerobot init my_run.mcap_dir/ -o cfg.yaml --fps 30
+```
 
 ### Splitting many demos out of one bag
 

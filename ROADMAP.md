@@ -18,9 +18,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       marks each episode boundary, and `convert --dry-run` previews the boundaries
       without writing. Follow-up below covers the other two splitting sources from the
       original item (CSV time ranges, idle gaps).
-- [ ] **`bag2lerobot init`** generates a starter YAML from `inspect` (JointState topics
+- [x] **`bag2lerobot init`** generates a starter YAML from `inspect` (JointState topics
       become state and action candidates, image topics become cameras) to make the
-      first conversion quick.
+      first conversion quick. Follow-up: once `--msg-dir` (custom message types) or
+      `--push-to-hub` land, teach `init` to pick up non-JointState numeric topics (e.g.
+      a gripper command on `std_msgs/Float64`) as extra features too.
 - [ ] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
       writes a dataset card (source bags, sync stats, config used).
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
@@ -56,3 +58,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 - 2026-10-12: `split_on` config topic splits one bag with many demos into multiple
   episodes (rising-edge `std_msgs/Bool` or every `std_msgs/Empty` message marks a
   boundary); `convert --dry-run` previews the boundaries first.
+- 2026-10-13: `bag2lerobot init` writes a starter config from one bag's topics
+  (JointState -> state/action candidates by name hint, Image/CompressedImage ->
+  `observation.images.*`), flagging guesses to double-check. Also fixed `task:` with no
+  value in a config parsing to the literal string `"None"` instead of empty.
