@@ -10,6 +10,7 @@ from bag2lerobot import __version__
 from bag2lerobot.config import ConfigError, load_config
 from bag2lerobot.convert import convert, preview_splits
 from bag2lerobot.extract import ExtractError, inspect_bag
+from bag2lerobot.init import generate_config
 from bag2lerobot.sync import SyncError
 
 
@@ -21,6 +22,15 @@ def _parser() -> argparse.ArgumentParser:
     ins = sub.add_parser("inspect", help="list topics, message types and rates in a bag")
     ins.add_argument(
         "bag", type=Path, help="ROS 1 .bag file, or ROS 2 bag directory (sqlite3/mcap)"
+    )
+
+    ini = sub.add_parser("init", help="generate a starter config from a bag's topics")
+    ini.add_argument(
+        "bag", type=Path, help="ROS 1 .bag file, or ROS 2 bag directory (sqlite3/mcap)"
+    )
+    ini.add_argument("--out", "-o", type=Path, help="write the config here (default: stdout)")
+    ini.add_argument(
+        "--fps", type=float, help="output frame rate (default: fastest JointState topic's rate)"
     )
 
     conv = sub.add_parser("convert", help="convert bags into a LeRobot dataset")
@@ -45,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "inspect":
             return _inspect(args)
+        if args.command == "init":
+            return _init(args)
         return _convert(args)
     except (
         ConfigError,
@@ -64,6 +76,16 @@ def _inspect(args) -> int:
     print(f"{'topic':<{width}}  {'type':<40} {'msgs':>7} {'rate':>9}")
     for t in topics:
         print(f"{t.topic:<{width}}  {t.msgtype:<40} {t.count:>7} {t.rate_hz:>7.1f}Hz")
+    return 0
+
+
+def _init(args) -> int:
+    text = generate_config(args.bag, fps=args.fps)
+    if args.out:
+        args.out.write_text(text)
+        print(f"wrote {args.out}")
+    else:
+        print(text, end="")
     return 0
 
 

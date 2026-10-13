@@ -106,7 +106,7 @@ def parse_config(data: dict) -> Config:
     cfg = Config(
         fps=float(data["fps"]),
         features=features,
-        task=str(data.get("task", "")),
+        task=str(data.get("task") or ""),
         robot_type=data.get("robot_type"),
         sync=sync.get("method", "hold"),
         max_staleness_s=float(sync.get("max_staleness_s", 0.25)),
