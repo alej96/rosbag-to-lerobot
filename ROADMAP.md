@@ -23,8 +23,10 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       first conversion quick. Follow-up: once `--msg-dir` (custom message types) or
       `--push-to-hub` land, teach `init` to pick up non-JointState numeric topics (e.g.
       a gripper command on `std_msgs/Float64`) as extra features too.
-- [ ] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
-      writes a dataset card (source bags, sync stats, config used).
+- [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
+      writes a dataset card (source bags, sync stats, config used). Follow-up: once
+      `--append` lands, re-push should update the card and only upload new/changed files
+      instead of re-uploading the whole dataset.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [ ] **Large bags.** Stream extraction and write data files in chunks
@@ -62,3 +64,6 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   (JointState -> state/action candidates by name hint, Image/CompressedImage ->
   `observation.images.*`), flagging guesses to double-check. Also fixed `task:` with no
   value in a config parsing to the literal string `"None"` instead of empty.
+- 2026-10-14: `--push-to-hub user/name` (optional `hub` extra) uploads a converted
+  dataset to the Hugging Face Hub and writes a dataset card summarizing source bags,
+  per-episode sync quality (stale frames, max gap) and features.

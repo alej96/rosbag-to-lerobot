@@ -23,6 +23,8 @@ one small YAML file.
   `convert --dry-run` to preview the boundaries before writing anything
 - `bag2lerobot init` writes a starter config from a bag's topics, so the first
   conversion doesn't start from a blank YAML file
+- `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
+  dataset card (source bags, sync quality, features); needs the `hub` extra
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
 
 ## Install
