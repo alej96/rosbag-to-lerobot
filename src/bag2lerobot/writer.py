@@ -16,7 +16,7 @@ DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 VIDEO_CODEC = "libx264"
 VIDEO_PIX_FMT = "yuv420p"
-_INDEX_FEATURES = {
+INDEX_FEATURES = {
     "timestamp": "float32",
     "frame_index": "int64",
     "episode_index": "int64",
@@ -127,7 +127,7 @@ def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: st
     features.update(
         {
             k: {"dtype": d, "shape": [1], "names": None, "fps": fps}
-            for k, d in _INDEX_FEATURES.items()
+            for k, d in INDEX_FEATURES.items()
         }
     )
     for key in image_keys:
@@ -192,7 +192,7 @@ def _write_video(path: Path, frames: list[np.ndarray], fps: float) -> None:
 
 def _stats(df: pd.DataFrame, keys: list[str]) -> dict:
     out = {}
-    for col in [*keys, *_INDEX_FEATURES]:
+    for col in [*keys, *INDEX_FEATURES]:
         arr = np.stack(df[col].to_numpy()) if col in keys else df[col].to_numpy()[:, None]
         arr = arr.astype(np.float64)
         out[col] = {

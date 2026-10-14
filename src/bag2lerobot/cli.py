@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from bag2lerobot import __version__
 from bag2lerobot.config import ConfigError, load_config
 from bag2lerobot.convert import convert, preview_splits
 from bag2lerobot.extract import ExtractError, inspect_bag
+from bag2lerobot.hub import dataset_card, push_to_hub
 from bag2lerobot.init import generate_config
 from bag2lerobot.sync import SyncError
 
@@ -46,6 +48,14 @@ def _parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="print the episode boundaries from the config's 'split_on' topic and exit",
+    )
+    conv.add_argument(
+        "--push-to-hub",
+        metavar="REPO_ID",
+        help="upload the dataset to the Hugging Face Hub, e.g. 'username/my-dataset'",
+    )
+    conv.add_argument(
+        "--private", action="store_true", help="make the Hub repo private (with --push-to-hub)"
     )
     return p
 
@@ -133,6 +143,12 @@ def _convert(args) -> int:
     if any_stale and args.strict:
         print("bag2lerobot: stale frames found (--strict)", file=sys.stderr)
         return 1
+    if args.push_to_hub:
+        info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
+        card = dataset_card(args.push_to_hub, cfg, info, reports)
+        (Path(args.out) / "README.md").write_text(card)
+        url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
+        print(f"pushed to {url}")
     return 0
 
 
