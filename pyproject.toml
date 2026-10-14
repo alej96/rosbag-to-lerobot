@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 video = ["av>=11", "pillow>=10"]
+hub = ["huggingface_hub>=0.24"]
 dev = ["pytest>=8", "ruff>=0.6", "av>=11", "pillow>=10"]
 
 [project.scripts]
