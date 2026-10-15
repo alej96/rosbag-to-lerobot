@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,21 +33,27 @@ def preview_splits(bags: list[Path], cfg: Config) -> dict[Path, list[float]]:
 
 
 def convert(
-    bags: list[Path], cfg: Config, out: Path, overwrite: bool = False
+    bags: list[Path], cfg: Config, out: Path, overwrite: bool = False, append: bool = False
 ) -> list[ConversionReport]:
-    """Convert each bag into one or more episodes of a new LeRobot dataset at ``out``.
+    """Convert each bag into one or more episodes of a LeRobot dataset at ``out``.
 
     When ``cfg.split_on`` is set, each bag is split into multiple episodes at the
     timestamps of messages on that topic (see ``extract.split_boundaries``); otherwise
-    each bag becomes exactly one episode.
+    each bag becomes exactly one episode. With ``append=True``, episodes are added to the
+    dataset already at ``out`` instead of replacing it (``out`` must hold one written by
+    a previous ``convert`` call, with matching fps and features).
     """
+    if overwrite and append:
+        raise ValueError("--overwrite and --append can't be used together")
     out = Path(out)
-    if out.exists() and any(out.iterdir()):
+    joint_order: dict[str, list[str]] = {}
+    if append:
+        joint_order = _seed_joint_order(out, cfg)
+    elif out.exists() and any(out.iterdir()):
         if not overwrite:
             raise FileExistsError(f"{out} is not empty (use --overwrite)")
         shutil.rmtree(out)
 
-    joint_order: dict[str, list[str]] = {}
     episodes, reports = [], []
     for bag in bags:
         streams = extract_streams(bag, cfg, joint_order)
@@ -56,5 +63,24 @@ def convert(
             result = synchronize(streams, cfg, image_streams, window=window)
             episodes.append(Episode(result, cfg.task))
             reports.append(ConversionReport(Path(bag), result, segment))
-    write_dataset(out, episodes, cfg.fps, cfg.robot_type)
+    write_dataset(out, episodes, cfg.fps, cfg.robot_type, append=append)
     return reports
+
+
+def _seed_joint_order(out: Path, cfg: Config) -> dict[str, list[str]]:
+    """Pin ``names_from`` features to the element order already established in an
+    existing dataset, so an appended bag whose driver reorders joints still lines up
+    with earlier episodes instead of silently shifting columns."""
+    info_path = Path(out) / "meta" / "info.json"
+    if not info_path.exists():
+        raise FileNotFoundError(
+            f"--append: {out} has no dataset to append to (missing {info_path})"
+        )
+    info = json.loads(info_path.read_text())
+    joint_order = {}
+    for spec in cfg.features:
+        if spec.type == "numeric" and spec.names_from and spec.key in info["features"]:
+            names = info["features"][spec.key].get("names")
+            if names:
+                joint_order[spec.key] = list(names)
+    return joint_order
