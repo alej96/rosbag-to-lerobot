@@ -21,6 +21,8 @@ one small YAML file.
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
 - Splits one bag with many demos into multiple episodes on a topic (`split_on`), with
   `convert --dry-run` to preview the boundaries before writing anything
+- `--append` adds episodes to an existing dataset instead of starting over, checking
+  that fps and features still match
 - `bag2lerobot init` writes a starter config from a bag's topics, so the first
   conversion doesn't start from a blank YAML file
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
@@ -81,6 +83,22 @@ is dropped. Preview the boundaries before converting anything:
 ```bash
 bag2lerobot convert run1.bag -c cfg.yaml --dry-run
 ```
+
+### Adding more episodes later
+
+If more demos show up after the first conversion, add them with `--append` instead of
+converting everything again:
+
+```bash
+bag2lerobot convert new_run.bag -c cfg.yaml -o ./my_dataset --append
+```
+
+The config must still describe the same fps and features (same keys, shapes and, for a
+`names_from` feature, the same joint names) as the dataset already at `-o`; `--append`
+checks this and fails with a clear error otherwise. Episode and frame indices continue
+from the existing dataset, new data/video files are added alongside the old ones, and
+`meta/stats.json` is recomputed over the combined dataset. `--append` and `--overwrite`
+can't be used together.
 
 ## Development
 
