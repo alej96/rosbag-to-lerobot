@@ -48,6 +48,23 @@ def test_output_loads_in_lerobot(make_bag, config_file, tmp_path):
     assert item["task"] == "pick the cube"
 
 
+@pytest.mark.lerobot
+def test_append_loads_in_lerobot(make_bag, config_file, tmp_path):
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    out = tmp_path / "ds"
+    first = ["convert", str(make_bag("mcap", name="a")), "-c", str(config_file), "-o", str(out)]
+    assert main(first) == 0
+    bag_b = make_bag("ros1", BagSpec(seed=3), name="b")
+    args = ["convert", str(bag_b), "-c", str(config_file), "-o", str(out), "--append"]
+    assert main(args) == 0
+
+    ds = lerobot_dataset.LeRobotDataset("local/bag2lerobot-append-test", root=out)
+    assert ds.num_episodes == 2
+    item = ds[len(ds) - 1]
+    assert tuple(item["observation.state"].shape) == (3,)
+    assert item["task"] == "pick the cube"
+
+
 IMAGE_CONFIG = """
 fps: 10
 task: pick the cube

@@ -42,6 +42,11 @@ def _parser() -> argparse.ArgumentParser:
     conv.add_argument("--task", help="task description (overrides the config)")
     conv.add_argument("--overwrite", action="store_true", help="replace an existing output dir")
     conv.add_argument(
+        "--append",
+        action="store_true",
+        help="add episodes to the existing dataset at --out instead of replacing it",
+    )
+    conv.add_argument(
         "--strict", action="store_true", help="fail if any frame had to use stale data"
     )
     conv.add_argument(
@@ -120,9 +125,13 @@ def _convert(args) -> int:
     if not args.out:
         print("bag2lerobot: --out is required (unless --dry-run)", file=sys.stderr)
         return 2
-    reports = convert(args.bags, cfg, args.out, overwrite=args.overwrite)
+    if args.append and args.overwrite:
+        print("bag2lerobot: --append and --overwrite can't be used together", file=sys.stderr)
+        return 2
+    reports = convert(args.bags, cfg, args.out, overwrite=args.overwrite, append=args.append)
     total = sum(r.sync.frames for r in reports)
-    print(f"wrote {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
+    action = "appended" if args.append else "wrote"
+    print(f"{action} {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
     any_stale = False
     for i, r in enumerate(reports):
         s = r.sync

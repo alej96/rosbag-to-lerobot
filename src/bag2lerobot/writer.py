@@ -31,8 +31,32 @@ class Episode:
     task: str
 
 
-def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: str | None) -> dict:
-    """Write episodes as a LeRobot v3.0 dataset under ``out``. Returns info.json."""
+@dataclass
+class _Existing:
+    info: dict
+    task_index: dict[str, int]
+    episode_offset: int
+    index_offset: int
+    data_file_index: int
+    episodes_file_index: int
+    video_file_index: dict[str, int]
+    stats: dict
+
+
+def write_dataset(
+    out: Path,
+    episodes: list[Episode],
+    fps: float,
+    robot_type: str | None,
+    append: bool = False,
+) -> dict:
+    """Write episodes as a LeRobot v3.0 dataset under ``out``. Returns info.json.
+
+    With ``append=True``, ``out`` must already hold a dataset written by this function;
+    the new episodes are added to it (new episode/frame indices continuing from the
+    existing totals, a new data file, a new per-key video file and merged tasks/stats)
+    instead of replacing it. The existing dataset's fps and features must match.
+    """
     if not episodes:
         raise ValueError("nothing to write")
     keys = list(episodes[0].sync.values)
@@ -49,13 +73,35 @@ def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: st
             if ep.sync.images[k][0].shape != episodes[0].sync.images[k][0].shape:
                 raise ValueError(f"image feature '{k}' has a different resolution across episodes")
 
-    tasks = list(dict.fromkeys(ep.task for ep in episodes))
-    task_index = {t: i for i, t in enumerate(tasks)}
+    out = Path(out)
+    existing = _load_existing(out) if append else None
+    if existing is not None:
+        _check_append_schema(existing.info, episodes, fps, robot_type)
+        task_index = dict(existing.task_index)
+        next_task_idx = max(task_index.values(), default=-1) + 1
+        episode_offset = existing.episode_offset
+        index_offset = existing.index_offset
+        data_file_index = existing.data_file_index
+        episodes_file_index = existing.episodes_file_index
+        video_file_index = existing.video_file_index
+    else:
+        task_index = {}
+        next_task_idx = 0
+        episode_offset = 0
+        index_offset = 0
+        data_file_index = 0
+        episodes_file_index = 0
+        video_file_index = dict.fromkeys(image_keys, 0)
+    for ep in episodes:
+        if ep.task not in task_index:
+            task_index[ep.task] = next_task_idx
+            next_task_idx += 1
 
     frames, ep_rows = [], []
-    index = 0
+    index = index_offset
     video_t = dict.fromkeys(image_keys, 0.0)  # cumulative seconds written so far, per video
-    for ep_idx, ep in enumerate(episodes):
+    for i, ep in enumerate(episodes):
+        ep_idx = episode_offset + i
         n = ep.sync.frames
         frame = {k: list(ep.sync.values[k]) for k in keys}
         frame.update(
@@ -72,17 +118,17 @@ def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: st
             "tasks": [ep.task],
             "length": n,
             "data/chunk_index": 0,
-            "data/file_index": 0,
+            "data/file_index": data_file_index,
             "dataset_from_index": index,
             "dataset_to_index": index + n,
             "meta/episodes/chunk_index": 0,
-            "meta/episodes/file_index": 0,
+            "meta/episodes/file_index": episodes_file_index,
         }
         for key in image_keys:
             from_t = video_t[key]
             to_t = from_t + n / fps
             row[f"videos/{key}/chunk_index"] = 0
-            row[f"videos/{key}/file_index"] = 0
+            row[f"videos/{key}/file_index"] = video_file_index[key]
             row[f"videos/{key}/from_timestamp"] = from_t
             row[f"videos/{key}/to_timestamp"] = to_t
             video_t[key] = to_t
@@ -96,20 +142,25 @@ def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: st
     for k in keys:
         data[k] = data[k].map(lambda v: np.asarray(v, dtype=np.float32))
 
-    out = Path(out)
     (out / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
     (out / "meta" / "episodes" / "chunk-000").mkdir(parents=True, exist_ok=True)
-    data.to_parquet(out / DATA_PATH.format(chunk_index=0, file_index=0), index=False)
+    data.to_parquet(out / DATA_PATH.format(chunk_index=0, file_index=data_file_index), index=False)
     pd.DataFrame(ep_rows).to_parquet(
-        out / "meta" / "episodes" / "chunk-000" / "file-000.parquet", index=False
+        out / "meta" / "episodes" / "chunk-000" / f"file-{episodes_file_index:03d}.parquet",
+        index=False,
     )
-    pd.DataFrame({"task_index": range(len(tasks))}, index=pd.Index(tasks, name="task")).to_parquet(
-        out / "meta" / "tasks.parquet"
-    )
-    (out / "meta" / "stats.json").write_text(json.dumps(_stats(data, keys), indent=2))
+    tasks = sorted(task_index, key=task_index.get)
+    pd.DataFrame(
+        {"task_index": [task_index[t] for t in tasks]}, index=pd.Index(tasks, name="task")
+    ).to_parquet(out / "meta" / "tasks.parquet")
+    new_stats = _stats(data, keys)
+    stats = _merge_stats(existing.stats, new_stats) if existing is not None else new_stats
+    (out / "meta" / "stats.json").write_text(json.dumps(stats, indent=2))
 
     for key in image_keys:
-        video_path = out / VIDEO_PATH.format(video_key=key, chunk_index=0, file_index=0)
+        video_path = out / VIDEO_PATH.format(
+            video_key=key, chunk_index=0, file_index=video_file_index[key]
+        )
         video_path.parent.mkdir(parents=True, exist_ok=True)
         all_frames = [frame for ep in episodes for frame in ep.sync.images[key]]
         _write_video(video_path, all_frames, fps)
@@ -148,23 +199,113 @@ def write_dataset(out: Path, episodes: list[Episode], fps: float, robot_type: st
                 "has_audio": False,
             },
         }
+    total_episodes = episode_offset + len(episodes)
     info = {
         "codebase_version": CODEBASE_VERSION,
         "robot_type": robot_type,
-        "total_episodes": len(episodes),
+        "total_episodes": total_episodes,
         "total_frames": int(index),
-        "total_tasks": len(tasks),
+        "total_tasks": len(task_index),
         "chunks_size": 1000,
         "data_files_size_in_mb": 100,
         "video_files_size_in_mb": 500,
         "fps": fps,
-        "splits": {"train": f"0:{len(episodes)}"},
+        "splits": {"train": f"0:{total_episodes}"},
         "data_path": DATA_PATH,
         "video_path": VIDEO_PATH if image_keys else None,
         "features": features,
     }
     (out / "meta" / "info.json").write_text(json.dumps(info, indent=4))
     return info
+
+
+def _load_existing(out: Path) -> _Existing:
+    info_path = out / "meta" / "info.json"
+    if not info_path.exists():
+        raise ValueError(f"--append: {out} has no dataset to append to (missing {info_path})")
+    info = json.loads(info_path.read_text())
+    tasks_df = pd.read_parquet(out / "meta" / "tasks.parquet")
+    task_index = dict(zip(tasks_df.index, (int(i) for i in tasks_df["task_index"]), strict=True))
+    stats = json.loads((out / "meta" / "stats.json").read_text())
+    data_files = sorted((out / "data" / "chunk-000").glob("file-*.parquet"))
+    episodes_files = sorted((out / "meta" / "episodes" / "chunk-000").glob("file-*.parquet"))
+    video_file_index = {}
+    for key, feat in info["features"].items():
+        if feat["dtype"] == "video":
+            video_dir = out / "videos" / key / "chunk-000"
+            files = list(video_dir.glob("file-*.mp4")) if video_dir.exists() else []
+            video_file_index[key] = len(files)
+    return _Existing(
+        info=info,
+        task_index=task_index,
+        episode_offset=info["total_episodes"],
+        index_offset=info["total_frames"],
+        data_file_index=len(data_files),
+        episodes_file_index=len(episodes_files),
+        video_file_index=video_file_index,
+        stats=stats,
+    )
+
+
+def _check_append_schema(
+    info: dict, episodes: list[Episode], fps: float, robot_type: str | None
+) -> None:
+    if info["fps"] != fps:
+        raise ValueError(
+            f"--append: fps mismatch (existing dataset is {info['fps']}, config is {fps})"
+        )
+    if info.get("robot_type") != robot_type:
+        raise ValueError(
+            f"--append: robot_type mismatch (existing dataset is {info.get('robot_type')!r}, "
+            f"config is {robot_type!r})"
+        )
+    keys = list(episodes[0].sync.values)
+    image_keys = list(episodes[0].sync.images)
+    existing_keys = set(info["features"]) - set(INDEX_FEATURES)
+    new_keys = set(keys) | set(image_keys)
+    if existing_keys != new_keys:
+        raise ValueError(
+            f"--append: feature mismatch (existing dataset has {sorted(existing_keys)}, "
+            f"config produces {sorted(new_keys)})"
+        )
+    for k in keys:
+        shape = [episodes[0].sync.values[k].shape[1]]
+        if info["features"][k]["shape"] != shape:
+            raise ValueError(
+                f"--append: feature '{k}' has shape {info['features'][k]['shape']} in the "
+                f"existing dataset, but {shape} now"
+            )
+    for k in image_keys:
+        h, w, c = episodes[0].sync.images[k][0].shape
+        if info["features"][k]["shape"] != [h, w, c]:
+            raise ValueError(
+                f"--append: image feature '{k}' has resolution {info['features'][k]['shape']} in "
+                f"the existing dataset, but [{h}, {w}, {c}] now"
+            )
+
+
+def _merge_stats(old: dict, new: dict) -> dict:
+    merged = {}
+    for col, new_stat in new.items():
+        old_stat = old.get(col)
+        if old_stat is None:
+            merged[col] = new_stat
+            continue
+        n1 = np.asarray(old_stat["count"], dtype=np.float64)
+        n2 = np.asarray(new_stat["count"], dtype=np.float64)
+        mean1, mean2 = np.asarray(old_stat["mean"]), np.asarray(new_stat["mean"])
+        std1, std2 = np.asarray(old_stat["std"]), np.asarray(new_stat["std"])
+        n = n1 + n2
+        mean = (mean1 * n1 + mean2 * n2) / n
+        var = (n1 * (std1**2 + (mean1 - mean) ** 2) + n2 * (std2**2 + (mean2 - mean) ** 2)) / n
+        merged[col] = {
+            "min": np.minimum(old_stat["min"], new_stat["min"]).tolist(),
+            "max": np.maximum(old_stat["max"], new_stat["max"]).tolist(),
+            "mean": mean.tolist(),
+            "std": np.sqrt(var).tolist(),
+            "count": n.tolist(),
+        }
+    return merged
 
 
 def _write_video(path: Path, frames: list[np.ndarray], fps: float) -> None:
