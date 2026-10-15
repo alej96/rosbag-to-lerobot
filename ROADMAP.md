@@ -31,8 +31,9 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [ ] **Large bags.** Stream extraction and write data files in chunks
       (`data_files_size_in_mb`) instead of holding everything in memory.
-- [ ] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
-      features and fps match.
+- [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
+      features and fps match. Follow-up: once Hub re-push can diff instead of
+      re-uploading everything, make it skip files `--append` didn't touch.
 - [ ] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
       plus a camera), add a `network` test tier, and record results in
       `docs/validated-bags.md`.
@@ -67,3 +68,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 - 2026-10-14: `--push-to-hub user/name` (optional `hub` extra) uploads a converted
   dataset to the Hugging Face Hub and writes a dataset card summarizing source bags,
   per-episode sync quality (stale frames, max gap) and features.
+- 2026-10-15: `--append` adds new episodes to an existing dataset (new data/episodes/video
+  files, merged tasks and globally combined stats) instead of requiring a full
+  reconversion, after checking fps, features and (for `names_from` features) joint order
+  all still match.
