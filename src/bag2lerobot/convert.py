@@ -10,7 +10,7 @@ from pathlib import Path
 from bag2lerobot.config import Config
 from bag2lerobot.extract import extract_image_streams, extract_streams, split_boundaries
 from bag2lerobot.sync import SyncResult, synchronize
-from bag2lerobot.writer import Episode, write_dataset
+from bag2lerobot.writer import DEFAULT_DATA_FILES_SIZE_IN_MB, Episode, write_dataset
 
 
 @dataclass
@@ -33,7 +33,12 @@ def preview_splits(bags: list[Path], cfg: Config) -> dict[Path, list[float]]:
 
 
 def convert(
-    bags: list[Path], cfg: Config, out: Path, overwrite: bool = False, append: bool = False
+    bags: list[Path],
+    cfg: Config,
+    out: Path,
+    overwrite: bool = False,
+    append: bool = False,
+    max_data_file_mb: float = DEFAULT_DATA_FILES_SIZE_IN_MB,
 ) -> list[ConversionReport]:
     """Convert each bag into one or more episodes of a LeRobot dataset at ``out``.
 
@@ -41,7 +46,9 @@ def convert(
     timestamps of messages on that topic (see ``extract.split_boundaries``); otherwise
     each bag becomes exactly one episode. With ``append=True``, episodes are added to the
     dataset already at ``out`` instead of replacing it (``out`` must hold one written by
-    a previous ``convert`` call, with matching fps and features).
+    a previous ``convert`` call, with matching fps and features). ``max_data_file_mb``
+    caps the size of each data parquet file; a conversion producing more data than that
+    is split across several files instead of one unboundedly large one.
     """
     if overwrite and append:
         raise ValueError("--overwrite and --append can't be used together")
@@ -63,7 +70,9 @@ def convert(
             result = synchronize(streams, cfg, image_streams, window=window)
             episodes.append(Episode(result, cfg.task))
             reports.append(ConversionReport(Path(bag), result, segment))
-    write_dataset(out, episodes, cfg.fps, cfg.robot_type, append=append)
+    write_dataset(
+        out, episodes, cfg.fps, cfg.robot_type, append=append, max_data_file_mb=max_data_file_mb
+    )
     return reports
 
 

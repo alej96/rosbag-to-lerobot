@@ -14,6 +14,7 @@ from bag2lerobot.extract import ExtractError, inspect_bag
 from bag2lerobot.hub import dataset_card, push_to_hub
 from bag2lerobot.init import generate_config
 from bag2lerobot.sync import SyncError
+from bag2lerobot.writer import DEFAULT_DATA_FILES_SIZE_IN_MB
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -48,6 +49,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     conv.add_argument(
         "--strict", action="store_true", help="fail if any frame had to use stale data"
+    )
+    conv.add_argument(
+        "--max-data-file-mb",
+        type=float,
+        default=DEFAULT_DATA_FILES_SIZE_IN_MB,
+        help=f"split the data parquet into files at most this big (default: "
+        f"{DEFAULT_DATA_FILES_SIZE_IN_MB:g})",
     )
     conv.add_argument(
         "--dry-run",
@@ -128,7 +136,14 @@ def _convert(args) -> int:
     if args.append and args.overwrite:
         print("bag2lerobot: --append and --overwrite can't be used together", file=sys.stderr)
         return 2
-    reports = convert(args.bags, cfg, args.out, overwrite=args.overwrite, append=args.append)
+    reports = convert(
+        args.bags,
+        cfg,
+        args.out,
+        overwrite=args.overwrite,
+        append=args.append,
+        max_data_file_mb=args.max_data_file_mb,
+    )
     total = sum(r.sync.frames for r in reports)
     action = "appended" if args.append else "wrote"
     print(f"{action} {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
