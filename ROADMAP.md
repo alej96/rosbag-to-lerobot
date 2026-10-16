@@ -29,8 +29,16 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       instead of re-uploading the whole dataset.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
-- [ ] **Large bags.** Stream extraction and write data files in chunks
-      (`data_files_size_in_mb`) instead of holding everything in memory.
+- [x] **Chunk data files by size.** The writer now splits the data parquet across
+      multiple files once a conversion exceeds `--max-data-file-mb` (default 100, same
+      as the `data_files_size_in_mb` already declared in `info.json`), instead of always
+      writing one file per `convert` call regardless of size. Follow-up below covers the
+      other half of the original "Large bags" item: streaming extraction itself.
+- [ ] **Stream extraction of huge bags.** `extract_streams`/`extract_image_streams` hold
+      every sample (and every decoded frame, for images) of one bag in memory before
+      sync. For a single bag that is itself huge (hours of data, or dense video), that
+      still blows up memory even with chunked output files. Needs incremental/windowed
+      resampling in `sync.py` so a bag can be read and written in pieces.
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
@@ -72,3 +80,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   files, merged tasks and globally combined stats) instead of requiring a full
   reconversion, after checking fps, features and (for `names_from` features) joint order
   all still match.
+- 2026-10-16: `--max-data-file-mb` splits the data parquet into multiple files once a
+  conversion exceeds the limit (default 100MB), instead of always writing one unbounded
+  file per `convert` call; `info.json`'s `data_files_size_in_mb` now reflects the limit
+  actually used. Streaming extraction for a single huge bag is split out as a follow-up.
