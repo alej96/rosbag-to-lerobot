@@ -16,6 +16,7 @@ DATA_PATH = "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"
 VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 VIDEO_CODEC = "libx264"
 VIDEO_PIX_FMT = "yuv420p"
+DEFAULT_DATA_FILES_SIZE_IN_MB = 100.0
 INDEX_FEATURES = {
     "timestamp": "float32",
     "frame_index": "int64",
@@ -49,13 +50,19 @@ def write_dataset(
     fps: float,
     robot_type: str | None,
     append: bool = False,
+    max_data_file_mb: float = DEFAULT_DATA_FILES_SIZE_IN_MB,
 ) -> dict:
     """Write episodes as a LeRobot v3.0 dataset under ``out``. Returns info.json.
 
     With ``append=True``, ``out`` must already hold a dataset written by this function;
     the new episodes are added to it (new episode/frame indices continuing from the
-    existing totals, a new data file, a new per-key video file and merged tasks/stats)
+    existing totals, new data file(s), a new per-key video file and merged tasks/stats)
     instead of replacing it. The existing dataset's fps and features must match.
+
+    The data parquet is split across multiple files, each kept under
+    ``max_data_file_mb`` (an episode is never split across files, so a single episode
+    larger than the limit still gets one file to itself), instead of writing every
+    episode from one call into a single, unboundedly large file.
     """
     if not episodes:
         raise ValueError("nothing to write")
@@ -97,9 +104,29 @@ def write_dataset(
             task_index[ep.task] = next_task_idx
             next_task_idx += 1
 
+    (out / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
+    (out / "meta" / "episodes" / "chunk-000").mkdir(parents=True, exist_ok=True)
+    max_bytes = max_data_file_mb * 1024 * 1024
+
     frames, ep_rows = [], []
     index = index_offset
     video_t = dict.fromkeys(image_keys, 0.0)  # cumulative seconds written so far, per video
+    file_index = data_file_index
+    chunk_frames: list[pd.DataFrame] = []
+    chunk_bytes = 0
+
+    def flush_chunk() -> None:
+        nonlocal file_index, chunk_frames, chunk_bytes
+        if not chunk_frames:
+            return
+        chunk = pd.concat(chunk_frames, ignore_index=True)
+        for k in keys:
+            chunk[k] = chunk[k].map(lambda v: np.asarray(v, dtype=np.float32))
+        chunk.to_parquet(out / DATA_PATH.format(chunk_index=0, file_index=file_index), index=False)
+        file_index += 1
+        chunk_frames = []
+        chunk_bytes = 0
+
     for i, ep in enumerate(episodes):
         ep_idx = episode_offset + i
         n = ep.sync.frames
@@ -113,12 +140,17 @@ def write_dataset(
         )
         df = pd.DataFrame(frame)
         frames.append(df)
+        df_bytes = int(df.memory_usage(deep=True).sum())
+        if chunk_frames and chunk_bytes + df_bytes > max_bytes:
+            flush_chunk()
+        chunk_frames.append(df)
+        chunk_bytes += df_bytes
         row = {
             "episode_index": ep_idx,
             "tasks": [ep.task],
             "length": n,
             "data/chunk_index": 0,
-            "data/file_index": data_file_index,
+            "data/file_index": file_index,
             "dataset_from_index": index,
             "dataset_to_index": index + n,
             "meta/episodes/chunk_index": 0,
@@ -138,13 +170,8 @@ def write_dataset(
         ep_rows.append(row)
         index += n
 
-    data = pd.concat(frames, ignore_index=True)
-    for k in keys:
-        data[k] = data[k].map(lambda v: np.asarray(v, dtype=np.float32))
+    flush_chunk()
 
-    (out / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
-    (out / "meta" / "episodes" / "chunk-000").mkdir(parents=True, exist_ok=True)
-    data.to_parquet(out / DATA_PATH.format(chunk_index=0, file_index=data_file_index), index=False)
     pd.DataFrame(ep_rows).to_parquet(
         out / "meta" / "episodes" / "chunk-000" / f"file-{episodes_file_index:03d}.parquet",
         index=False,
@@ -153,6 +180,7 @@ def write_dataset(
     pd.DataFrame(
         {"task_index": [task_index[t] for t in tasks]}, index=pd.Index(tasks, name="task")
     ).to_parquet(out / "meta" / "tasks.parquet")
+    data = pd.concat(frames, ignore_index=True)
     new_stats = _stats(data, keys)
     stats = _merge_stats(existing.stats, new_stats) if existing is not None else new_stats
     (out / "meta" / "stats.json").write_text(json.dumps(stats, indent=2))
@@ -207,7 +235,7 @@ def write_dataset(
         "total_frames": int(index),
         "total_tasks": len(task_index),
         "chunks_size": 1000,
-        "data_files_size_in_mb": 100,
+        "data_files_size_in_mb": max_data_file_mb,
         "video_files_size_in_mb": 500,
         "fps": fps,
         "splits": {"train": f"0:{total_episodes}"},

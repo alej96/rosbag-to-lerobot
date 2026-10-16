@@ -65,6 +65,31 @@ def test_append_loads_in_lerobot(make_bag, config_file, tmp_path):
     assert item["task"] == "pick the cube"
 
 
+@pytest.mark.lerobot
+def test_chunked_data_files_load_in_lerobot(make_bag, config_file, tmp_path):
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    bags = [make_bag("mcap", name="a"), make_bag("ros1", BagSpec(seed=3), name="b")]
+    out = tmp_path / "ds"
+    args = [
+        "convert",
+        *map(str, bags),
+        "-c",
+        str(config_file),
+        "-o",
+        str(out),
+        "--max-data-file-mb",
+        "0.001",
+    ]
+    assert main(args) == 0
+    assert len(list((out / "data" / "chunk-000").glob("file-*.parquet"))) > 1
+
+    ds = lerobot_dataset.LeRobotDataset("local/bag2lerobot-chunk-test", root=out)
+    assert ds.num_episodes == 2
+    item = ds[len(ds) - 1]
+    assert tuple(item["observation.state"].shape) == (3,)
+    assert item["task"] == "pick the cube"
+
+
 IMAGE_CONFIG = """
 fps: 10
 task: pick the cube
