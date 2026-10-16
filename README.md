@@ -23,6 +23,9 @@ one small YAML file.
   `convert --dry-run` to preview the boundaries before writing anything
 - `--append` adds episodes to an existing dataset instead of starting over, checking
   that fps and features still match
+- `--max-data-file-mb` caps the size of each data parquet file (default 100MB, matching
+  `info.json`'s `data_files_size_in_mb`); a large conversion is split across several data
+  files instead of growing one file without bound
 - `bag2lerobot init` writes a starter config from a bag's topics, so the first
   conversion doesn't start from a blank YAML file
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
@@ -99,6 +102,21 @@ checks this and fails with a clear error otherwise. Episode and frame indices co
 from the existing dataset, new data/video files are added alongside the old ones, and
 `meta/stats.json` is recomputed over the combined dataset. `--append` and `--overwrite`
 can't be used together.
+
+### Large conversions
+
+By default the data parquet for one `convert` call is split into files of at most
+100MB (an episode is never split across files, so one unusually long episode can still
+produce a file over the limit). Tune it with `--max-data-file-mb` if you need smaller
+files, e.g. to stay under a Hub upload limit:
+
+```bash
+bag2lerobot convert run*/ -c cfg.yaml -o ./ds --max-data-file-mb 20
+```
+
+Reading still holds one bag's extracted samples and decoded frames in memory at a time;
+converting bags that are individually huge (hours of data, or video, in one file) is not
+yet streamed and is tracked as a follow-up.
 
 ## Development
 
