@@ -60,7 +60,7 @@ def _parser() -> argparse.ArgumentParser:
     conv.add_argument(
         "--dry-run",
         action="store_true",
-        help="print the episode boundaries from the config's 'split_on' topic and exit",
+        help="print the episode boundaries from 'split_on' or 'split_idle_gap_s' and exit",
     )
     conv.add_argument(
         "--push-to-hub",
@@ -113,11 +113,15 @@ def _init(args) -> int:
 
 
 def _dry_run(args, cfg) -> int:
-    if not cfg.split_on:
-        print("bag2lerobot: --dry-run needs 'split_on' in the config", file=sys.stderr)
+    if not cfg.split_on and not cfg.split_idle_gap_s:
+        print(
+            "bag2lerobot: --dry-run needs 'split_on' or 'split_idle_gap_s' in the config",
+            file=sys.stderr,
+        )
         return 2
+    source = f"'{cfg.split_on}'" if cfg.split_on else f"idle gaps >= {cfg.split_idle_gap_s:g}s"
     for bag, boundaries in preview_splits(args.bags, cfg).items():
-        print(f"{bag.name}: {len(boundaries)} episode(s) on '{cfg.split_on}'")
+        print(f"{bag.name}: {len(boundaries)} episode(s) on {source}")
         for i, start in enumerate(boundaries):
             end = f"{boundaries[i + 1]:.3f}s" if i + 1 < len(boundaries) else "end"
             print(f"  ep {i}: {start:.3f}s -> {end}")
@@ -148,9 +152,10 @@ def _convert(args) -> int:
     action = "appended" if args.append else "wrote"
     print(f"{action} {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
     any_stale = False
+    splitting = cfg.split_on or cfg.split_idle_gap_s
     for i, r in enumerate(reports):
         s = r.sync
-        label = r.bag.name if not cfg.split_on else f"{r.bag.name} seg {r.segment}"
+        label = r.bag.name if not splitting else f"{r.bag.name} seg {r.segment}"
         print(
             f"  ep {i}: {label}  {s.frames} frames  "
             f"(trimmed {s.trimmed_start_s:.2f}s start, {s.trimmed_end_s:.2f}s end)"
