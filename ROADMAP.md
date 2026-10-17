@@ -47,9 +47,12 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       `docs/validated-bags.md`.
 - [ ] **Custom message types** from `.msg` files (`--msg-dir`) for ROS 1/2 bags recorded
       without embedded definitions.
-- [ ] **Episode splitting on time ranges or idle gaps.** Split a bag into episodes from a
-      CSV of time ranges, or automatically on idle gaps between demos, reusing the
-      `split_on`/`--dry-run` machinery added for topic-based splitting.
+- [x] **Episode splitting on idle gaps.** `split_idle_gap_s` splits a bag into episodes
+      wherever every configured stream goes idle for at least that long, reusing the
+      `--dry-run` machinery added for topic-based splitting. Follow-up below covers the
+      other splitting source from the original item (CSV time ranges).
+- [ ] **Episode splitting on time ranges from a CSV.** Split a bag into episodes from a
+      CSV of time ranges, reusing the `split_on`/`--dry-run` machinery.
 
 ## Needs the owner
 
@@ -84,3 +87,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   conversion exceeds the limit (default 100MB), instead of always writing one unbounded
   file per `convert` call; `info.json`'s `data_files_size_in_mb` now reflects the limit
   actually used. Streaming extraction for a single huge bag is split out as a follow-up.
+- 2026-10-17: `split_idle_gap_s` splits a bag into episodes wherever every configured
+  stream goes idle for at least that long, for demos that aren't marked by a topic;
+  `--dry-run` previews these boundaries too. Splitting episodes from a CSV of time
+  ranges is split out as a follow-up.
