@@ -19,7 +19,8 @@ one small YAML file.
 - Maps `sensor_msgs/Image` and `CompressedImage` topics to `observation.images.*` video
   features: frames are held on the same frame grid as everything else and encoded to MP4
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
-- Splits one bag with many demos into multiple episodes on a topic (`split_on`), with
+- Splits one bag with many demos into multiple episodes, either on a topic (`split_on`)
+  or automatically wherever every stream goes idle (`split_idle_gap_s`), with
   `convert --dry-run` to preview the boundaries before writing anything
 - `--append` adds episodes to an existing dataset instead of starting over, checking
   that fps and features still match
@@ -86,6 +87,17 @@ is dropped. Preview the boundaries before converting anything:
 ```bash
 bag2lerobot convert run1.bag -c cfg.yaml --dry-run
 ```
+
+If demos aren't marked by a topic but are separated by idle time (the operator pauses
+between demos and every topic stops publishing), set `split_idle_gap_s` instead: a new
+episode starts wherever all topics combined go quiet for at least that many seconds. No
+data is dropped (unlike `split_on`, the first sample starts the first episode).
+
+```yaml
+split_idle_gap_s: 2.0
+```
+
+`split_on` and `split_idle_gap_s` can't both be set; `--dry-run` previews either one.
 
 ### Adding more episodes later
 
