@@ -54,7 +54,8 @@ def synchronize(
     stale frames rather than silently dropped. Image streams are always held (the most
     recent decoded frame) rather than interpolated. ``window``, when given, further
     restricts the frame grid to ``[window[0], window[1])`` (e.g. one episode split out of
-    a longer bag via ``cfg.split_on``); ``window[1]`` may be ``float("inf")``.
+    a longer bag via ``cfg.split_on`` or ``cfg.split_idle_gap_s``); ``window[1]`` may be
+    ``float("inf")``.
     """
     image_streams = image_streams or {}
     all_times = [s.times for s in streams.values()] + [s.times for s in image_streams.values()]

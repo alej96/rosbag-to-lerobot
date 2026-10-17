@@ -35,6 +35,7 @@ class Config:
     time_source: str = "header"
     trim_to_overlap: bool = True
     split_on: str | None = None  # topic whose messages mark episode-start boundaries
+    split_idle_gap_s: float | None = None  # idle gap (s) across all streams that splits episodes
     extra: dict = field(default_factory=dict)
 
     def feature(self, key: str) -> FeatureSpec:
@@ -103,6 +104,11 @@ def parse_config(data: dict) -> Config:
     split_on = data.get("split_on")
     if split_on is not None and not isinstance(split_on, str):
         raise ConfigError("'split_on' must be a topic name (string)")
+    split_idle_gap_s = data.get("split_idle_gap_s")
+    if split_idle_gap_s is not None:
+        split_idle_gap_s = float(split_idle_gap_s)
+    if split_on and split_idle_gap_s:
+        raise ConfigError("'split_on' and 'split_idle_gap_s' can't both be set")
     cfg = Config(
         fps=float(data["fps"]),
         features=features,
@@ -113,6 +119,7 @@ def parse_config(data: dict) -> Config:
         time_source=data.get("time_source", "header"),
         trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
         split_on=split_on or None,
+        split_idle_gap_s=split_idle_gap_s,
     )
     if cfg.fps <= 0:
         raise ConfigError("'fps' must be positive")
@@ -120,4 +127,6 @@ def parse_config(data: dict) -> Config:
         raise ConfigError(f"sync.method must be one of {SYNC_METHODS}, got '{cfg.sync}'")
     if cfg.time_source not in TIME_SOURCES:
         raise ConfigError(f"time_source must be one of {TIME_SOURCES}, got '{cfg.time_source}'")
+    if cfg.split_idle_gap_s is not None and cfg.split_idle_gap_s <= 0:
+        raise ConfigError("'split_idle_gap_s' must be positive")
     return cfg

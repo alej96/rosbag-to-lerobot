@@ -203,6 +203,25 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
     return sorted(times)
 
 
+def idle_gap_boundaries(
+    streams: dict[str, Stream], image_streams: dict[str, ImageStream], min_gap_s: float
+) -> list[float]:
+    """Episode-start timestamps (s) from idle gaps of at least ``min_gap_s`` in the merged
+    timeline of every configured stream.
+
+    Unlike ``split_boundaries``, every sample belongs to some episode: the first boundary
+    is the earliest timestamp across all streams, and each later boundary is the first
+    sample after a gap at least ``min_gap_s`` long, so nothing is dropped.
+    """
+    arrays = [s.times for s in streams.values()] + [s.times for s in image_streams.values()]
+    if not arrays or all(a.size == 0 for a in arrays):
+        raise ExtractError("no data to split on idle gaps")
+    t = np.sort(np.concatenate(arrays))
+    gaps = np.diff(t)
+    idle = np.flatnonzero(gaps >= min_gap_s)
+    return [float(t[0]), *(float(t[i + 1]) for i in idle)]
+
+
 def _decode_image(msg) -> np.ndarray:
     """Decode a sensor_msgs/Image or CompressedImage message into an (H, W, 3) RGB array."""
     msgtype = getattr(msg, "__msgtype__", "")

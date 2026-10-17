@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bag2lerobot.config import Config
-from bag2lerobot.extract import extract_image_streams, extract_streams, split_boundaries
+from bag2lerobot.extract import (
+    extract_image_streams,
+    extract_streams,
+    idle_gap_boundaries,
+    split_boundaries,
+)
 from bag2lerobot.sync import SyncResult, synchronize
 from bag2lerobot.writer import DEFAULT_DATA_FILES_SIZE_IN_MB, Episode, write_dataset
 
@@ -17,7 +22,7 @@ from bag2lerobot.writer import DEFAULT_DATA_FILES_SIZE_IN_MB, Episode, write_dat
 class ConversionReport:
     bag: Path
     sync: SyncResult
-    segment: int = 0  # index of this episode within its source bag (when split_on is set)
+    segment: int = 0  # index of this episode within its source bag (when splitting is on)
 
 
 def _windows(boundaries: list[float]) -> list[tuple[float, float]]:
@@ -25,11 +30,23 @@ def _windows(boundaries: list[float]) -> list[tuple[float, float]]:
     return list(zip(boundaries, ends, strict=True))
 
 
+def _boundaries(bag: Path, cfg: Config, streams=None, image_streams=None) -> list[float] | None:
+    if cfg.split_on:
+        return split_boundaries(bag, cfg.split_on, cfg)
+    if cfg.split_idle_gap_s:
+        if streams is None:
+            streams = extract_streams(bag, cfg)
+        if image_streams is None:
+            image_streams = extract_image_streams(bag, cfg)
+        return idle_gap_boundaries(streams, image_streams, cfg.split_idle_gap_s)
+    return None
+
+
 def preview_splits(bags: list[Path], cfg: Config) -> dict[Path, list[float]]:
     """Episode-start timestamps (s) ``convert`` would split each bag on, without writing."""
-    if not cfg.split_on:
-        raise ValueError("config has no 'split_on' topic to preview")
-    return {Path(bag): split_boundaries(bag, cfg.split_on, cfg) for bag in bags}
+    if not cfg.split_on and not cfg.split_idle_gap_s:
+        raise ValueError("config has no 'split_on' topic or 'split_idle_gap_s' to preview")
+    return {Path(bag): _boundaries(Path(bag), cfg) for bag in bags}
 
 
 def convert(
@@ -43,12 +60,14 @@ def convert(
     """Convert each bag into one or more episodes of a LeRobot dataset at ``out``.
 
     When ``cfg.split_on`` is set, each bag is split into multiple episodes at the
-    timestamps of messages on that topic (see ``extract.split_boundaries``); otherwise
-    each bag becomes exactly one episode. With ``append=True``, episodes are added to the
-    dataset already at ``out`` instead of replacing it (``out`` must hold one written by
-    a previous ``convert`` call, with matching fps and features). ``max_data_file_mb``
-    caps the size of each data parquet file; a conversion producing more data than that
-    is split across several files instead of one unboundedly large one.
+    timestamps of messages on that topic (see ``extract.split_boundaries``). When
+    ``cfg.split_idle_gap_s`` is set instead, each bag is split wherever every stream goes
+    idle for at least that long (see ``extract.idle_gap_boundaries``). Otherwise each bag
+    becomes exactly one episode. With ``append=True``, episodes are added to the dataset
+    already at ``out`` instead of replacing it (``out`` must hold one written by a
+    previous ``convert`` call, with matching fps and features). ``max_data_file_mb`` caps
+    the size of each data parquet file; a conversion producing more data than that is
+    split across several files instead of one unboundedly large one.
     """
     if overwrite and append:
         raise ValueError("--overwrite and --append can't be used together")
@@ -65,7 +84,8 @@ def convert(
     for bag in bags:
         streams = extract_streams(bag, cfg, joint_order)
         image_streams = extract_image_streams(bag, cfg)
-        windows = _windows(split_boundaries(bag, cfg.split_on, cfg)) if cfg.split_on else [None]
+        boundaries = _boundaries(bag, cfg, streams, image_streams)
+        windows = _windows(boundaries) if boundaries is not None else [None]
         for segment, window in enumerate(windows):
             result = synchronize(streams, cfg, image_streams, window=window)
             episodes.append(Episode(result, cfg.task))
