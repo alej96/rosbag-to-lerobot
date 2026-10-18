@@ -36,17 +36,33 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       other half of the original "Large bags" item: streaming extraction itself.
 - [ ] **Stream extraction of huge bags.** `extract_streams`/`extract_image_streams` hold
       every sample (and every decoded frame, for images) of one bag in memory before
-      sync. For a single bag that is itself huge (hours of data, or dense video), that
-      still blows up memory even with chunked output files. Needs incremental/windowed
-      resampling in `sync.py` so a bag can be read and written in pieces.
+      sync. Too big for one slice; split into:
+      - [ ] **Streaming video encoding.** The real memory blowup: `extract_image_streams`
+            decodes and holds every raw camera frame of a bag before `synchronize` even
+            picks which ones land on the frame grid, and `writer._write_video` then wants
+            the whole per-episode frame list again. For dense/long video this is the
+            dominant cost (a single 720p camera at 30 Hz for one hour is ~300GB of decoded
+            frames). Needs a single streaming pass per image topic, once the frame grid
+            (t0/dt/frame count) is known from the numeric streams: hold-sample and feed
+            each grid frame straight to the video encoder instead of materializing a
+            frame list, reworking `writer.py`'s per-episode video writing to accept a
+            frame source instead of `list[np.ndarray]`.
+      - [ ] **Streaming numeric extraction.** `extract_streams` holds every numeric sample
+            of a bag before sync; lower priority than video since float vectors are much
+            smaller per-sample, but still unbounded for a bag with many high-rate numeric
+            topics over hours. Needs windowed resampling in `sync.py`.
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
 - [ ] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
       plus a camera), add a `network` test tier, and record results in
       `docs/validated-bags.md`.
-- [ ] **Custom message types** from `.msg` files (`--msg-dir`) for ROS 1/2 bags recorded
-      without embedded definitions.
+- [x] **Custom message types** from `.msg` files (`--msg-dir`) for bags recorded without
+      embedded definitions (sqlite3 bags from `rosbag2` releases before the
+      type-description-hash feature). Follow-up: a bag that embeds definitions for some
+      topics but not others still can't mix in a custom type for the undocumented ones —
+      `rosbags`' `AnyReader` falls back to a given typestore only when *no* connection in
+      the bag has an embedded definition, not per-connection.
 - [x] **Episode splitting on idle gaps.** `split_idle_gap_s` splits a bag into episodes
       wherever every configured stream goes idle for at least that long, reusing the
       `--dry-run` machinery added for topic-based splitting. Follow-up below covers the
@@ -91,3 +107,9 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   stream goes idle for at least that long, for demos that aren't marked by a topic;
   `--dry-run` previews these boundaries too. Splitting episodes from a CSV of time
   ranges is split out as a follow-up.
+- 2026-10-18: `--msg-dir` registers custom message types from `.msg` files for a bag
+  recorded with no embedded message definitions at all (sqlite3 bags from `rosbag2`
+  releases before the type-description-hash feature), which previously failed with a bare
+  `KeyError` the moment a non-standard message type was deserialized. "Stream extraction
+  of huge bags" was judged too large for one session and split into two scoped follow-ups
+  (streaming video encoding, the dominant memory cost; streaming numeric extraction).

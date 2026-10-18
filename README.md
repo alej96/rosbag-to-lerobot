@@ -29,6 +29,9 @@ one small YAML file.
   files instead of growing one file without bound
 - `bag2lerobot init` writes a starter config from a bag's topics, so the first
   conversion doesn't start from a blank YAML file
+- `--msg-dir` registers custom message types from `.msg` files for a bag recorded with no
+  embedded message definitions (common for sqlite3 bags from `rosbag2` releases older than
+  the type-description-hash feature)
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
   dataset card (source bags, sync quality, features); needs the `hub` extra
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
@@ -129,6 +132,29 @@ bag2lerobot convert run*/ -c cfg.yaml -o ./ds --max-data-file-mb 20
 Reading still holds one bag's extracted samples and decoded frames in memory at a time;
 converting bags that are individually huge (hours of data, or video, in one file) is not
 yet streamed and is tracked as a follow-up.
+
+### Bags with custom message types
+
+Most bags carry their own message definitions and `bag2lerobot` reads them automatically,
+whatever the message type. The exception is a bag recorded with **no** embedded
+definitions at all — this happens for sqlite3 bags from `rosbag2` releases older than the
+type-description-hash feature (roughly ROS 2 Humble and earlier). Such a bag's standard
+message types (`sensor_msgs/JointState`, etc.) still resolve by name against the message
+definitions `bag2lerobot` already ships with, but a custom, robot-specific type (e.g. a
+gripper command message from your own ROS package) has no source of truth left and fails
+with a clear error pointing here.
+
+Point `--msg-dir` at the `.msg` files that define it, laid out the way a ROS package
+already is on disk:
+
+```bash
+bag2lerobot convert run.bag -c cfg.yaml -o ./ds --msg-dir ~/ros_ws/src
+```
+
+`--msg-dir` is searched recursively for `<package>/msg/<Name>.msg` (point it at a whole
+workspace's `src/`) or the flatter `<package>/<Name>.msg`. This only matters for a bag with
+no embedded definitions anywhere in it; it's never needed for `inspect`/`init`, and has no
+effect on a bag that already embeds its own definitions.
 
 ## Development
 
