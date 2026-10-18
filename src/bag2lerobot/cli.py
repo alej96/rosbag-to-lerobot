@@ -68,6 +68,12 @@ def _parser() -> argparse.ArgumentParser:
         help="upload the dataset to the Hugging Face Hub, e.g. 'username/my-dataset'",
     )
     conv.add_argument(
+        "--msg-dir",
+        type=Path,
+        help="directory of custom .msg files ('<package>/msg/<Name>.msg'), for a bag "
+        "recorded with no embedded message definitions",
+    )
+    conv.add_argument(
         "--private", action="store_true", help="make the Hub repo private (with --push-to-hub)"
     )
     return p
@@ -120,7 +126,7 @@ def _dry_run(args, cfg) -> int:
         )
         return 2
     source = f"'{cfg.split_on}'" if cfg.split_on else f"idle gaps >= {cfg.split_idle_gap_s:g}s"
-    for bag, boundaries in preview_splits(args.bags, cfg).items():
+    for bag, boundaries in preview_splits(args.bags, cfg, msg_dir=args.msg_dir).items():
         print(f"{bag.name}: {len(boundaries)} episode(s) on {source}")
         for i, start in enumerate(boundaries):
             end = f"{boundaries[i + 1]:.3f}s" if i + 1 < len(boundaries) else "end"
@@ -147,6 +153,7 @@ def _convert(args) -> int:
         overwrite=args.overwrite,
         append=args.append,
         max_data_file_mb=args.max_data_file_mb,
+        msg_dir=args.msg_dir,
     )
     total = sum(r.sync.frames for r in reports)
     action = "appended" if args.append else "wrote"

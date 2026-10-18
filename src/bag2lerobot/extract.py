@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 from rosbags.highlevel import AnyReader
-from rosbags.typesys import Stores, get_typestore
+from rosbags.typesys import Stores, get_types_from_msg, get_typestore
+from rosbags.typesys.store import Typestore
 
 from bag2lerobot.config import Config, FeatureSpec
 
@@ -61,10 +62,59 @@ class ExtractError(ValueError):
     pass
 
 
-def _reader(path: Path) -> AnyReader:
-    # ROS 2 bags carry their message definitions; the default store covers ROS 1 bags
-    # and ROS 2 bags recorded without definitions.
-    return AnyReader([Path(path)], default_typestore=get_typestore(Stores.LATEST))
+def _reader(path: Path, msg_dir: str | Path | None = None) -> AnyReader:
+    # Most bags carry their own message definitions and ignore this typestore entirely;
+    # it's only consulted for a bag recorded with no embedded definitions at all (common
+    # for sqlite3 bags from rosbag2 releases older than the type-description-hash feature),
+    # where every message type, standard or custom, must be looked up by name instead.
+    return AnyReader([Path(path)], default_typestore=_typestore(msg_dir))
+
+
+def _typestore(msg_dir: str | Path | None) -> Typestore:
+    store = get_typestore(Stores.LATEST)
+    if msg_dir is None:
+        return store
+    msg_dir = Path(msg_dir)
+    if not msg_dir.is_dir():
+        raise ExtractError(f"--msg-dir {msg_dir}: not a directory")
+    msg_files = sorted(msg_dir.rglob("*.msg"))
+    if not msg_files:
+        raise ExtractError(f"--msg-dir {msg_dir}: no .msg files found")
+    types = {}
+    for msg_path in msg_files:
+        name = _msgtype_from_path(msg_path, msg_dir)
+        types.update(get_types_from_msg(msg_path.read_text(), name))
+    store.register(types)
+    return store
+
+
+def _msgtype_from_path(msg_path: Path, msg_dir: Path) -> str:
+    """Guess a message's full type name (e.g. ``my_robot/msg/GripperCmd``) from its path.
+
+    Matches a real ROS package layout: ``<msg_dir>/<package>/msg/<Name>.msg`` (point
+    ``--msg-dir`` at a catkin/ament workspace's ``src/`` to pick up every package), or the
+    flatter ``<msg_dir>/<package>/<Name>.msg``.
+    """
+    parts = msg_path.relative_to(msg_dir).with_suffix("").parts
+    if "msg" not in parts:
+        if len(parts) < 2:
+            raise ExtractError(
+                f"{msg_path}: expected '<package>/msg/<Name>.msg' or '<package>/<Name>.msg' "
+                "under --msg-dir"
+            )
+        parts = (parts[0], "msg", *parts[1:])
+    return "/".join(parts)
+
+
+def _deserialize(reader: AnyReader, conn, raw: bytes, path: Path):
+    try:
+        return reader.deserialize(raw, conn.msgtype)
+    except KeyError as exc:
+        raise ExtractError(
+            f"{path}: '{conn.msgtype}' (topic {conn.topic}) is not a known message type; this "
+            "bag has no embedded definition for it, so point --msg-dir at the .msg file that "
+            "defines it"
+        ) from exc
 
 
 def inspect_bag(path: str | Path) -> list[TopicInfo]:
@@ -85,12 +135,17 @@ def inspect_bag(path: str | Path) -> list[TopicInfo]:
 
 
 def extract_streams(
-    path: str | Path, cfg: Config, joint_order: dict[str, list[str]] | None = None
+    path: str | Path,
+    cfg: Config,
+    joint_order: dict[str, list[str]] | None = None,
+    msg_dir: str | Path | None = None,
 ) -> dict[str, Stream]:
     """Read every configured feature from one bag.
 
     ``joint_order`` is shared across the bags of one conversion so that named elements
-    (e.g. JointState joints) keep the same column order in every episode.
+    (e.g. JointState joints) keep the same column order in every episode. ``msg_dir``
+    registers custom message types (see ``_typestore``) for a bag with no embedded
+    definitions.
     """
     joint_order = {} if joint_order is None else joint_order
     specs = [s for s in cfg.features if s.type == "numeric"]
@@ -100,7 +155,7 @@ def extract_streams(
 
     samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
     names: dict[str, list[str]] = {}
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), msg_dir) as reader:
         available = {c.topic for c in reader.connections}
         missing = sorted(set(by_topic) - available)
         if missing:
@@ -110,7 +165,7 @@ def extract_streams(
             )
         conns = [c for c in reader.connections if c.topic in by_topic]
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, conn, raw, Path(path))
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
             for spec in by_topic[conn.topic]:
                 vec, vec_names = _flatten(msg, spec, joint_order)
@@ -136,7 +191,9 @@ def extract_streams(
     return streams
 
 
-def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStream]:
+def extract_image_streams(
+    path: str | Path, cfg: Config, msg_dir: str | Path | None = None
+) -> dict[str, ImageStream]:
     """Decode every configured image feature from one bag into RGB frames."""
     specs = [s for s in cfg.features if s.type == "image"]
     if not specs:
@@ -146,7 +203,7 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
         by_topic.setdefault(spec.topic, []).append(spec)
 
     samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), msg_dir) as reader:
         available = {c.topic for c in reader.connections}
         missing = sorted(set(by_topic) - available)
         if missing:
@@ -156,7 +213,7 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
             )
         conns = [c for c in reader.connections if c.topic in by_topic]
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, conn, raw, Path(path))
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
             frame = _decode_image(msg)
             for spec in by_topic[conn.topic]:
@@ -175,7 +232,9 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
     return streams
 
 
-def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
+def split_boundaries(
+    path: str | Path, topic: str, cfg: Config, msg_dir: str | Path | None = None
+) -> list[float]:
     """Episode-start timestamps (s) from messages on ``topic``.
 
     A ``std_msgs/Bool`` message starts a new episode only on a rising edge (``data``
@@ -183,7 +242,7 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
     every message. Each boundary marks where one episode ends and the next begins; data
     before the first boundary belongs to no episode and is dropped.
     """
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), msg_dir) as reader:
         conns = [c for c in reader.connections if c.topic == topic]
         if not conns:
             available = sorted({c.topic for c in reader.connections})
@@ -193,7 +252,7 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
         is_bool = conns[0].msgtype.endswith("Bool")
         times = []
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, conn, raw, Path(path))
             if is_bool and not bool(msg.data):
                 continue
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9

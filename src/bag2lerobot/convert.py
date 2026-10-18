@@ -30,23 +30,27 @@ def _windows(boundaries: list[float]) -> list[tuple[float, float]]:
     return list(zip(boundaries, ends, strict=True))
 
 
-def _boundaries(bag: Path, cfg: Config, streams=None, image_streams=None) -> list[float] | None:
+def _boundaries(
+    bag: Path, cfg: Config, streams=None, image_streams=None, msg_dir: str | Path | None = None
+) -> list[float] | None:
     if cfg.split_on:
-        return split_boundaries(bag, cfg.split_on, cfg)
+        return split_boundaries(bag, cfg.split_on, cfg, msg_dir)
     if cfg.split_idle_gap_s:
         if streams is None:
-            streams = extract_streams(bag, cfg)
+            streams = extract_streams(bag, cfg, msg_dir=msg_dir)
         if image_streams is None:
-            image_streams = extract_image_streams(bag, cfg)
+            image_streams = extract_image_streams(bag, cfg, msg_dir=msg_dir)
         return idle_gap_boundaries(streams, image_streams, cfg.split_idle_gap_s)
     return None
 
 
-def preview_splits(bags: list[Path], cfg: Config) -> dict[Path, list[float]]:
+def preview_splits(
+    bags: list[Path], cfg: Config, msg_dir: str | Path | None = None
+) -> dict[Path, list[float]]:
     """Episode-start timestamps (s) ``convert`` would split each bag on, without writing."""
     if not cfg.split_on and not cfg.split_idle_gap_s:
         raise ValueError("config has no 'split_on' topic or 'split_idle_gap_s' to preview")
-    return {Path(bag): _boundaries(Path(bag), cfg) for bag in bags}
+    return {Path(bag): _boundaries(Path(bag), cfg, msg_dir=msg_dir) for bag in bags}
 
 
 def convert(
@@ -56,6 +60,7 @@ def convert(
     overwrite: bool = False,
     append: bool = False,
     max_data_file_mb: float = DEFAULT_DATA_FILES_SIZE_IN_MB,
+    msg_dir: str | Path | None = None,
 ) -> list[ConversionReport]:
     """Convert each bag into one or more episodes of a LeRobot dataset at ``out``.
 
@@ -67,7 +72,8 @@ def convert(
     already at ``out`` instead of replacing it (``out`` must hold one written by a
     previous ``convert`` call, with matching fps and features). ``max_data_file_mb`` caps
     the size of each data parquet file; a conversion producing more data than that is
-    split across several files instead of one unboundedly large one.
+    split across several files instead of one unboundedly large one. ``msg_dir`` registers
+    custom message types from ``.msg`` files for a bag with no embedded definitions.
     """
     if overwrite and append:
         raise ValueError("--overwrite and --append can't be used together")
@@ -82,9 +88,9 @@ def convert(
 
     episodes, reports = [], []
     for bag in bags:
-        streams = extract_streams(bag, cfg, joint_order)
-        image_streams = extract_image_streams(bag, cfg)
-        boundaries = _boundaries(bag, cfg, streams, image_streams)
+        streams = extract_streams(bag, cfg, joint_order, msg_dir)
+        image_streams = extract_image_streams(bag, cfg, msg_dir)
+        boundaries = _boundaries(bag, cfg, streams, image_streams, msg_dir)
         windows = _windows(boundaries) if boundaries is not None else [None]
         for segment, window in enumerate(windows):
             result = synchronize(streams, cfg, image_streams, window=window)
