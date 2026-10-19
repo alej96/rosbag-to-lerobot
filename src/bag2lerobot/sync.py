@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from bag2lerobot.config import Config
-from bag2lerobot.extract import ImageStream, Stream
+from bag2lerobot.extract import ImageStream, Stream, decode_image
 
 
 @dataclass
@@ -143,7 +143,12 @@ def synchronize(
                 max_staleness_s=staleness,
             )
         )
-        images[key] = [s.frames[i] for i in idx]
+        decoded: dict[int, np.ndarray] = {}
+        for i in idx:
+            i = int(i)
+            if i not in decoded:
+                decoded[i] = decode_image(s.frames[i])
+        images[key] = [decoded[int(i)] for i in idx]
 
     return SyncResult(
         t0=t0,
