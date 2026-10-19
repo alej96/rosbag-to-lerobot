@@ -8,7 +8,8 @@ import pytest
 
 from bag2lerobot.config import ConfigError, load_config, parse_config
 from bag2lerobot.convert import convert
-from bag2lerobot.extract import ExtractError, _decode_image, extract_image_streams
+from bag2lerobot.extract import ExtractError, decode_image, extract_image_streams, extract_streams
+from bag2lerobot.sync import synchronize
 from tests.conftest import BagSpec
 
 IMAGE_CONFIG = """
@@ -104,11 +105,59 @@ def test_decodes_raw_and_compressed_images(make_bag):
         }
     )
     streams = extract_image_streams(bag, cfg)
-    raw_frame = streams["raw"].frames[-1]
-    compressed_frame = streams["compressed"].frames[-1]
+    raw_frame = decode_image(streams["raw"].frames[-1])
+    compressed_frame = decode_image(streams["compressed"].frames[-1])
     assert raw_frame.shape == compressed_frame.shape == (6, 8, 3)
     # jpeg is lossy but should stay close to the raw frame
     assert np.abs(raw_frame.astype(int) - compressed_frame.astype(int)).max() < 10
+
+
+def test_image_decoding_is_deferred(make_bag):
+    """Frames aren't decoded until sync picks the ones the output grid needs."""
+    bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=10))
+    cfg = parse_config(
+        {"fps": 10, "features": {"cam": {"topic": "/cam/image_raw", "type": "image"}}}
+    )
+    streams = extract_image_streams(bag, cfg)
+    assert not isinstance(streams["cam"].frames[-1], np.ndarray)
+
+
+def test_image_decoding_skips_unselected_frames_and_dedupes_repeats(monkeypatch, make_bag):
+    """A camera publishing faster than the output fps shouldn't have every frame decoded,
+    and a frame held across several output rows shouldn't be decoded more than once."""
+    from bag2lerobot import sync as sync_mod
+
+    bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=20))
+    cfg = parse_config(
+        {
+            "fps": 5,
+            "features": {
+                "state": {
+                    "topic": "/follower/joint_states",
+                    "field": "position",
+                    "names_from": "name",
+                },
+                "cam": {"topic": "/cam/image_raw", "type": "image"},
+            },
+        }
+    )
+    streams = extract_streams(bag, cfg)
+    image_streams = extract_image_streams(bag, cfg)
+    n_raw = len(image_streams["cam"].frames)
+
+    decoded_ids = []
+    real_decode = sync_mod.decode_image
+
+    def spy(msg):
+        decoded_ids.append(id(msg))
+        return real_decode(msg)
+
+    monkeypatch.setattr(sync_mod, "decode_image", spy)
+    result = synchronize(streams, cfg, image_streams)
+
+    assert len(decoded_ids) == len(set(decoded_ids))  # each raw frame decoded at most once
+    assert len(decoded_ids) < n_raw  # frames the grid never samples are never decoded
+    assert len(result.images["cam"]) == result.frames
 
 
 def test_unsupported_image_encoding_rejected():
@@ -123,7 +172,7 @@ def test_unsupported_image_encoding_rejected():
         data: np.ndarray = None
 
     with pytest.raises(ExtractError, match="unsupported image encoding"):
-        _decode_image(FakeImage(data=np.zeros(16, dtype=np.uint8)))
+        decode_image(FakeImage(data=np.zeros(16, dtype=np.uint8)))
 
 
 @pytest.mark.parametrize(
@@ -152,7 +201,7 @@ def test_decodes_every_supported_raw_encoding(encoding, channels, pixel, expecte
         step: int = w * channels
         data: np.ndarray = None
 
-    out = _decode_image(FakeImage(data=data))
+    out = decode_image(FakeImage(data=data))
     assert out.shape == (h, w, 3)
     assert tuple(int(c) for c in out[0, 0]) == expected_rgb
 

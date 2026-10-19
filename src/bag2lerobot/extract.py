@@ -26,12 +26,16 @@ class Stream:
 
 @dataclass
 class ImageStream:
-    """All frames of one image feature: times in seconds and decoded RGB uint8 frames."""
+    """All frames of one image feature: times in seconds and the raw, not-yet-decoded
+    message for each. Decoding is deferred to ``sync.synchronize`` (via ``decode_image``),
+    which only needs the frames the output grid actually samples; a bag's camera often
+    publishes faster than the configured fps, so most raw frames are never decoded at
+    all."""
 
     key: str
     topic: str
     times: np.ndarray
-    frames: list[np.ndarray]  # each (H, W, 3) uint8, RGB
+    frames: list  # raw deserialized messages, decode with decode_image()
 
 
 # numpy dtype/channel layout for raw sensor_msgs/Image encodings we can decode without a
@@ -137,7 +141,7 @@ def extract_streams(
 
 
 def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStream]:
-    """Decode every configured image feature from one bag into RGB frames."""
+    """Read every configured image feature's messages from one bag, without decoding."""
     specs = [s for s in cfg.features if s.type == "image"]
     if not specs:
         return {}
@@ -145,7 +149,7 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
     for spec in specs:
         by_topic.setdefault(spec.topic, []).append(spec)
 
-    samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
+    samples: dict[str, tuple[list[float], list]] = {s.key: ([], []) for s in specs}
     with _reader(Path(path)) as reader:
         available = {c.topic for c in reader.connections}
         missing = sorted(set(by_topic) - available)
@@ -158,11 +162,10 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
         for conn, bag_t, raw in reader.messages(connections=conns):
             msg = reader.deserialize(raw, conn.msgtype)
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
-            frame = _decode_image(msg)
             for spec in by_topic[conn.topic]:
                 times, frames = samples[spec.key]
                 times.append(t)
-                frames.append(frame)
+                frames.append(msg)
 
     streams = {}
     for spec in specs:
@@ -222,7 +225,7 @@ def idle_gap_boundaries(
     return [float(t[0]), *(float(t[i + 1]) for i in idle)]
 
 
-def _decode_image(msg) -> np.ndarray:
+def decode_image(msg) -> np.ndarray:
     """Decode a sensor_msgs/Image or CompressedImage message into an (H, W, 3) RGB array."""
     msgtype = getattr(msg, "__msgtype__", "")
     if msgtype.endswith("CompressedImage"):
