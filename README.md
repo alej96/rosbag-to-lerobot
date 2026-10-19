@@ -18,7 +18,9 @@ one small YAML file.
 - Flattens nested messages (`pose.position`, `pose.orientation`) into named columns
 - Maps `sensor_msgs/Image` and `CompressedImage` topics to `observation.images.*` video
   features: frames are held on the same frame grid as everything else and encoded to MP4
-  (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra
+  (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra. Only the
+  frames the output grid actually samples are decoded, so a camera recorded faster than
+  the configured `fps` doesn't waste memory decoding frames that get thrown away.
 - Splits one bag with many demos into multiple episodes, either on a topic (`split_on`)
   or automatically wherever every stream goes idle (`split_idle_gap_s`), with
   `convert --dry-run` to preview the boundaries before writing anything

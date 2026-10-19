@@ -34,11 +34,19 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       as the `data_files_size_in_mb` already declared in `info.json`), instead of always
       writing one file per `convert` call regardless of size. Follow-up below covers the
       other half of the original "Large bags" item: streaming extraction itself.
-- [ ] **Stream extraction of huge bags.** `extract_streams`/`extract_image_streams` hold
-      every sample (and every decoded frame, for images) of one bag in memory before
-      sync. For a single bag that is itself huge (hours of data, or dense video), that
-      still blows up memory even with chunked output files. Needs incremental/windowed
-      resampling in `sync.py` so a bag can be read and written in pieces.
+- [x] **Decode only the image frames sync actually samples.** `extract_image_streams` used
+      to decode every camera message up front and hold the full RGB frame list in memory,
+      even though a camera recorded faster than the configured `fps` throws most of those
+      frames away, and `split_idle_gap_s` only ever needed their timestamps. It now keeps
+      the raw message and decodes lazily (deduped) once `synchronize` knows which frames
+      the output grid actually needs. First slice of the "stream extraction" item below.
+- [ ] **Stream extraction of huge bags.** `extract_streams`/`extract_image_streams` still
+      hold every sample of one bag in memory before sync, and `convert` holds every bag's
+      synchronized episodes (now lazily-decoded frames included) in memory before
+      `write_dataset` runs once at the end. For a single bag that is itself huge (hours of
+      data, or dense video), or a conversion of many bags, that still blows up memory.
+      Needs incremental/windowed resampling in `sync.py` and writing episodes as they're
+      produced instead of batching, so a conversion can be read and written in pieces.
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
@@ -91,3 +99,9 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   stream goes idle for at least that long, for demos that aren't marked by a topic;
   `--dry-run` previews these boundaries too. Splitting episodes from a CSV of time
   ranges is split out as a follow-up.
+- 2026-10-19: `extract_image_streams` no longer decodes every camera message up front;
+  frames are decoded lazily (and only once per unique frame) once `synchronize` knows
+  which ones the output grid actually samples, so a camera recorded faster than the
+  configured fps no longer wastes memory and CPU decoding frames that get thrown away.
+  First slice of the "stream extraction of huge bags" item; batching every bag's episodes
+  in memory before `write_dataset` runs is the remaining follow-up.
