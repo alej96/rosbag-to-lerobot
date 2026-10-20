@@ -68,11 +68,21 @@ def convert(
     previous ``convert`` call, with matching fps and features). ``max_data_file_mb`` caps
     the size of each data parquet file; a conversion producing more data than that is
     split across several files instead of one unboundedly large one.
+
+    Bags are read and synchronized one at a time, and ``write_dataset`` writes (and, for
+    image features, encodes) each episode as soon as it's produced, instead of first
+    collecting every bag's episodes (decoded video frames included) into one big list:
+    peak memory scales with the largest single bag, not with the sum of all of them. A
+    fresh (non-append) conversion that fails partway removes the partial dataset it
+    created, so a failure never leaves ``out`` holding only some of the bags.
     """
     if overwrite and append:
         raise ValueError("--overwrite and --append can't be used together")
+    if not bags:
+        raise ValueError("nothing to write")
     out = Path(out)
     joint_order: dict[str, list[str]] = {}
+    created = not append
     if append:
         joint_order = _seed_joint_order(out, cfg)
     elif out.exists() and any(out.iterdir()):
@@ -80,19 +90,38 @@ def convert(
             raise FileExistsError(f"{out} is not empty (use --overwrite)")
         shutil.rmtree(out)
 
-    episodes, reports = [], []
-    for bag in bags:
-        streams = extract_streams(bag, cfg, joint_order)
-        image_streams = extract_image_streams(bag, cfg)
-        boundaries = _boundaries(bag, cfg, streams, image_streams)
-        windows = _windows(boundaries) if boundaries is not None else [None]
-        for segment, window in enumerate(windows):
-            result = synchronize(streams, cfg, image_streams, window=window)
-            episodes.append(Episode(result, cfg.task))
-            reports.append(ConversionReport(Path(bag), result, segment))
-    write_dataset(
-        out, episodes, cfg.fps, cfg.robot_type, append=append, max_data_file_mb=max_data_file_mb
-    )
+    reports: list[ConversionReport] = []
+
+    def episodes():
+        for bag in bags:
+            streams = extract_streams(bag, cfg, joint_order)
+            image_streams = extract_image_streams(bag, cfg)
+            boundaries = _boundaries(bag, cfg, streams, image_streams)
+            windows = _windows(boundaries) if boundaries is not None else [None]
+            for segment, window in enumerate(windows):
+                result = synchronize(streams, cfg, image_streams, window=window)
+                reports.append(ConversionReport(Path(bag), result, segment))
+                yield Episode(result, cfg.task)
+                # write_dataset has already written (and, for images, encoded) this
+                # episode by the time it asks for the next one: drop the per-frame
+                # data so the kept `reports` list doesn't pin every bag's values and
+                # decoded image frames in memory for the rest of the conversion.
+                result.values = {}
+                result.images = {}
+
+    try:
+        write_dataset(
+            out,
+            episodes(),
+            cfg.fps,
+            cfg.robot_type,
+            append=append,
+            max_data_file_mb=max_data_file_mb,
+        )
+    except Exception:
+        if created and out.exists():
+            shutil.rmtree(out)
+        raise
     return reports
 
 

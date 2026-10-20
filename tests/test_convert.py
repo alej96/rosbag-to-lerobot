@@ -6,7 +6,9 @@ import pytest
 
 from bag2lerobot.config import ConfigError, load_config
 from bag2lerobot.convert import convert
-from bag2lerobot.extract import ExtractError, extract_streams
+from bag2lerobot.extract import ExtractError, extract_image_streams, extract_streams
+from bag2lerobot.sync import synchronize
+from bag2lerobot.writer import Episode, write_dataset
 from tests.conftest import JOINTS, BagSpec, signal
 
 
@@ -106,6 +108,43 @@ def test_multiple_bags_become_episodes(make_bag, config_file, tmp_path):
     for _, group in data.groupby("episode_index"):
         assert list(group["frame_index"]) == list(range(len(group)))
         assert group["timestamp"].iloc[0] == 0
+
+
+def test_reports_drop_bulk_frame_data_once_written(make_bag, config_file, tmp_path):
+    """convert() must not keep every episode's full per-frame value arrays alive in the
+    reports it returns once write_dataset has written them: holding onto them would
+    reintroduce, across many bags, the same memory blowup that writing episodes as
+    they're produced (instead of batching them all before one write) is meant to fix."""
+    bags = [
+        make_bag("mcap", BagSpec(seconds=1.0, seed=1), name="a"),
+        make_bag("ros1", BagSpec(seconds=1.0, seed=2), name="b"),
+    ]
+    reports = convert(bags, load_config(config_file), tmp_path / "ds")
+    assert len(reports) == 2
+    for r in reports:
+        assert r.sync.values == {}
+        assert r.sync.frames > 0  # the lightweight report fields stay intact
+        assert r.sync.streams
+
+
+def test_write_dataset_streams_a_real_generator(make_bag, config_file, tmp_path):
+    """write_dataset must consume episodes one at a time instead of requiring a list it
+    can len()/index: feeding it a genuine generator (never materialized into a list) is
+    exactly how convert() avoids holding every bag's episodes in memory at once."""
+    bag = make_bag()
+    cfg = load_config(config_file)
+    streams = extract_streams(bag, cfg)
+    image_streams = extract_image_streams(bag, cfg)
+    result = synchronize(streams, cfg, image_streams)
+
+    def gen():
+        yield Episode(result, cfg.task)
+
+    out = tmp_path / "ds"
+    write_dataset(out, gen(), cfg.fps, cfg.robot_type)
+    info, data, _ = _read(out)
+    assert info["total_episodes"] == 1
+    assert len(data) == result.frames
 
 
 PER_FEATURE_SYNC_CONFIG = """
