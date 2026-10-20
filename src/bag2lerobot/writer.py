@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,7 +48,7 @@ class _Existing:
 
 def write_dataset(
     out: Path,
-    episodes: list[Episode],
+    episodes: Iterable[Episode],
     fps: float,
     robot_type: str | None,
     append: bool = False,
@@ -63,27 +65,33 @@ def write_dataset(
     ``max_data_file_mb`` (an episode is never split across files, so a single episode
     larger than the limit still gets one file to itself), instead of writing every
     episode from one call into a single, unboundedly large file.
+
+    ``episodes`` is consumed in one pass, writing (and, for image features, encoding)
+    each episode before asking for the next, instead of first collecting every episode
+    (decoded video frames included) into a list: peak memory is bounded by one episode,
+    not by how many episodes the caller passes in. A caller may still pass a plain
+    list; only a generator actually benefits. If an episode partway through turns out
+    to have a mismatched feature or image resolution, the episodes before it have
+    already been written to ``out``; callers that need all-or-nothing writes should
+    remove a freshly-created ``out`` on failure themselves (``append=True`` already
+    only ever adds new files, so a failure there just leaves the earlier ones appended).
     """
-    if not episodes:
-        raise ValueError("nothing to write")
-    keys = list(episodes[0].sync.values)
-    image_keys = list(episodes[0].sync.images)
-    for ep in episodes[1:]:
-        if list(ep.sync.values) != keys:
-            raise ValueError("all episodes must have the same features")
-        if list(ep.sync.images) != image_keys:
-            raise ValueError("all episodes must have the same image features")
-        for k in keys:
-            if ep.sync.values[k].shape[1] != episodes[0].sync.values[k].shape[1]:
-                raise ValueError(f"feature '{k}' has a different size across episodes")
-        for k in image_keys:
-            if ep.sync.images[k][0].shape != episodes[0].sync.images[k][0].shape:
-                raise ValueError(f"image feature '{k}' has a different resolution across episodes")
+    episodes = iter(episodes)
+    try:
+        first = next(episodes)
+    except StopIteration:
+        raise ValueError("nothing to write") from None
+    episodes = itertools.chain([first], episodes)
+
+    keys = list(first.sync.values)
+    image_keys = list(first.sync.images)
+    value_widths = {k: first.sync.values[k].shape[1] for k in keys}
+    image_shapes = {k: first.sync.images[k][0].shape for k in image_keys}
 
     out = Path(out)
     existing = _load_existing(out) if append else None
     if existing is not None:
-        _check_append_schema(existing.info, episodes, fps, robot_type)
+        _check_append_schema(existing.info, [first], fps, robot_type)
         task_index = dict(existing.task_index)
         next_task_idx = max(task_index.values(), default=-1) + 1
         episode_offset = existing.episode_offset
@@ -99,21 +107,18 @@ def write_dataset(
         data_file_index = 0
         episodes_file_index = 0
         video_file_index = dict.fromkeys(image_keys, 0)
-    for ep in episodes:
-        if ep.task not in task_index:
-            task_index[ep.task] = next_task_idx
-            next_task_idx += 1
 
     (out / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
     (out / "meta" / "episodes" / "chunk-000").mkdir(parents=True, exist_ok=True)
     max_bytes = max_data_file_mb * 1024 * 1024
 
-    frames, ep_rows = [], []
+    ep_rows: list[dict] = []
     index = index_offset
     video_t = dict.fromkeys(image_keys, 0.0)  # cumulative seconds written so far, per video
     file_index = data_file_index
     chunk_frames: list[pd.DataFrame] = []
     chunk_bytes = 0
+    running_stats: dict | None = None
 
     def flush_chunk() -> None:
         nonlocal file_index, chunk_frames, chunk_bytes
@@ -127,50 +132,85 @@ def write_dataset(
         chunk_frames = []
         chunk_bytes = 0
 
-    for i, ep in enumerate(episodes):
-        ep_idx = episode_offset + i
-        n = ep.sync.frames
-        frame = {k: list(ep.sync.values[k]) for k in keys}
-        frame.update(
-            timestamp=(np.arange(n) / fps).astype(np.float32),
-            frame_index=np.arange(n, dtype=np.int64),
-            episode_index=np.full(n, ep_idx, dtype=np.int64),
-            index=np.arange(index, index + n, dtype=np.int64),
-            task_index=np.full(n, task_index[ep.task], dtype=np.int64),
-        )
-        df = pd.DataFrame(frame)
-        frames.append(df)
-        df_bytes = int(df.memory_usage(deep=True).sum())
-        if chunk_frames and chunk_bytes + df_bytes > max_bytes:
-            flush_chunk()
-        chunk_frames.append(df)
-        chunk_bytes += df_bytes
-        row = {
-            "episode_index": ep_idx,
-            "tasks": [ep.task],
-            "length": n,
-            "data/chunk_index": 0,
-            "data/file_index": file_index,
-            "dataset_from_index": index,
-            "dataset_to_index": index + n,
-            "meta/episodes/chunk_index": 0,
-            "meta/episodes/file_index": episodes_file_index,
-        }
-        for key in image_keys:
-            from_t = video_t[key]
-            to_t = from_t + n / fps
-            row[f"videos/{key}/chunk_index"] = 0
-            row[f"videos/{key}/file_index"] = video_file_index[key]
-            row[f"videos/{key}/from_timestamp"] = from_t
-            row[f"videos/{key}/to_timestamp"] = to_t
-            video_t[key] = to_t
-        for col, stats in _stats(df, keys).items():
-            for stat, value in stats.items():
-                row[f"stats/{col}/{stat}"] = value
-        ep_rows.append(row)
-        index += n
+    video_containers, video_streams = _open_video_streams(
+        out, image_keys, video_file_index, fps, image_shapes
+    )
+
+    try:
+        n_episodes = 0
+        for i, ep in enumerate(episodes):
+            if list(ep.sync.values) != keys:
+                raise ValueError("all episodes must have the same features")
+            if list(ep.sync.images) != image_keys:
+                raise ValueError("all episodes must have the same image features")
+            for k in keys:
+                if ep.sync.values[k].shape[1] != value_widths[k]:
+                    raise ValueError(f"feature '{k}' has a different size across episodes")
+            for k in image_keys:
+                if ep.sync.images[k][0].shape != image_shapes[k]:
+                    raise ValueError(
+                        f"image feature '{k}' has a different resolution across episodes"
+                    )
+            if ep.task not in task_index:
+                task_index[ep.task] = next_task_idx
+                next_task_idx += 1
+
+            ep_idx = episode_offset + i
+            n = ep.sync.frames
+            frame = {k: list(ep.sync.values[k]) for k in keys}
+            frame.update(
+                timestamp=(np.arange(n) / fps).astype(np.float32),
+                frame_index=np.arange(n, dtype=np.int64),
+                episode_index=np.full(n, ep_idx, dtype=np.int64),
+                index=np.arange(index, index + n, dtype=np.int64),
+                task_index=np.full(n, task_index[ep.task], dtype=np.int64),
+            )
+            df = pd.DataFrame(frame)
+            df_bytes = int(df.memory_usage(deep=True).sum())
+            if chunk_frames and chunk_bytes + df_bytes > max_bytes:
+                flush_chunk()
+            chunk_frames.append(df)
+            chunk_bytes += df_bytes
+            row = {
+                "episode_index": ep_idx,
+                "tasks": [ep.task],
+                "length": n,
+                "data/chunk_index": 0,
+                "data/file_index": file_index,
+                "dataset_from_index": index,
+                "dataset_to_index": index + n,
+                "meta/episodes/chunk_index": 0,
+                "meta/episodes/file_index": episodes_file_index,
+            }
+            for key in image_keys:
+                from_t = video_t[key]
+                to_t = from_t + n / fps
+                row[f"videos/{key}/chunk_index"] = 0
+                row[f"videos/{key}/file_index"] = video_file_index[key]
+                row[f"videos/{key}/from_timestamp"] = from_t
+                row[f"videos/{key}/to_timestamp"] = to_t
+                video_t[key] = to_t
+                _encode_frames(video_containers[key], video_streams[key], ep.sync.images[key])
+            ep_stats = _stats(df, keys)
+            for col, stats in ep_stats.items():
+                for stat, value in stats.items():
+                    row[f"stats/{col}/{stat}"] = value
+            running_stats = (
+                ep_stats if running_stats is None else _merge_stats(running_stats, ep_stats)
+            )
+            ep_rows.append(row)
+            index += n
+            n_episodes += 1
+    except Exception:
+        for container in video_containers.values():
+            container.close()
+        raise
 
     flush_chunk()
+    for key in image_keys:
+        for packet in video_streams[key].encode():
+            video_containers[key].mux(packet)
+        video_containers[key].close()
 
     pd.DataFrame(ep_rows).to_parquet(
         out / "meta" / "episodes" / "chunk-000" / f"file-{episodes_file_index:03d}.parquet",
@@ -180,24 +220,15 @@ def write_dataset(
     pd.DataFrame(
         {"task_index": [task_index[t] for t in tasks]}, index=pd.Index(tasks, name="task")
     ).to_parquet(out / "meta" / "tasks.parquet")
-    data = pd.concat(frames, ignore_index=True)
-    new_stats = _stats(data, keys)
+    new_stats = running_stats or {}
     stats = _merge_stats(existing.stats, new_stats) if existing is not None else new_stats
     (out / "meta" / "stats.json").write_text(json.dumps(stats, indent=2))
 
-    for key in image_keys:
-        video_path = out / VIDEO_PATH.format(
-            video_key=key, chunk_index=0, file_index=video_file_index[key]
-        )
-        video_path.parent.mkdir(parents=True, exist_ok=True)
-        all_frames = [frame for ep in episodes for frame in ep.sync.images[key]]
-        _write_video(video_path, all_frames, fps)
-
-    names = episodes[0].sync.names
+    names = first.sync.names
     features = {
         k: {
             "dtype": "float32",
-            "shape": [episodes[0].sync.values[k].shape[1]],
+            "shape": [value_widths[k]],
             "names": names[k],
             "fps": fps,
         }
@@ -210,7 +241,7 @@ def write_dataset(
         }
     )
     for key in image_keys:
-        h, w, c = episodes[0].sync.images[key][0].shape
+        h, w, c = image_shapes[key]
         features[key] = {
             "dtype": "video",
             "shape": [h, w, c],
@@ -227,7 +258,7 @@ def write_dataset(
                 "has_audio": False,
             },
         }
-    total_episodes = episode_offset + len(episodes)
+    total_episodes = episode_offset + n_episodes
     info = {
         "codebase_version": CODEBASE_VERSION,
         "robot_type": robot_type,
@@ -336,27 +367,47 @@ def _merge_stats(old: dict, new: dict) -> dict:
     return merged
 
 
-def _write_video(path: Path, frames: list[np.ndarray], fps: float) -> None:
-    """Encode RGB frames into an MP4 file (H.264/yuv420p) at the dataset's fps."""
+def _open_video_streams(
+    out: Path,
+    image_keys: list[str],
+    video_file_index: dict[str, int],
+    fps: float,
+    image_shapes: dict[str, tuple[int, int, int]],
+):
+    """Open one MP4 container+stream per image key, ready to encode frames as episodes
+    arrive, instead of collecting every episode's decoded frames before writing any of
+    them."""
+    if not image_keys:
+        return {}, {}
     try:
         import av
     except ImportError as exc:
         raise ValueError(
             "writing image features needs the 'video' extra: pip install 'bag2lerobot[video]'"
         ) from exc
-    container = av.open(str(path), mode="w")
-    try:
+    containers, streams = {}, {}
+    for key in image_keys:
+        path = out / VIDEO_PATH.format(
+            video_key=key, chunk_index=0, file_index=video_file_index[key]
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        container = av.open(str(path), mode="w")
         stream = container.add_stream(VIDEO_CODEC, rate=round(fps))
-        stream.height = frames[0].shape[0]
-        stream.width = frames[0].shape[1]
+        h, w, _ = image_shapes[key]
+        stream.height = h
+        stream.width = w
         stream.pix_fmt = VIDEO_PIX_FMT
-        for frame in frames:
-            for packet in stream.encode(av.VideoFrame.from_ndarray(frame, format="rgb24")):
-                container.mux(packet)
-        for packet in stream.encode():
+        containers[key] = container
+        streams[key] = stream
+    return containers, streams
+
+
+def _encode_frames(container, stream, frames: list[np.ndarray]) -> None:
+    import av
+
+    for frame in frames:
+        for packet in stream.encode(av.VideoFrame.from_ndarray(frame, format="rgb24")):
             container.mux(packet)
-    finally:
-        container.close()
 
 
 def _stats(df: pd.DataFrame, keys: list[str]) -> dict:

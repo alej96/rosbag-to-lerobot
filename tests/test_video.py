@@ -82,6 +82,20 @@ def test_image_frames_span_episode_boundaries_in_one_video(make_bag, tmp_path):
     assert len(list(container.decode(video=0))) == n0 + n1
 
 
+def test_decoded_frames_are_not_retained_in_reports_after_writing(make_bag, tmp_path):
+    """Once an episode's frames are muxed into the video file, convert() must not keep
+    them alive in the report it returns: that would hold every bag's decoded images in
+    memory for the whole conversion, the exact blowup streaming video encoding (writing
+    each episode's frames as they're produced, instead of collecting every episode's
+    decoded frames before encoding one video) is meant to avoid."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(IMAGE_CONFIG)
+    bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=10))
+    reports = convert([bag], load_config(cfg_path), tmp_path / "ds")
+    assert reports[0].sync.images == {}
+    assert reports[0].sync.frames > 0
+
+
 def test_mismatched_image_resolution_across_episodes_rejected(make_bag, tmp_path):
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(IMAGE_CONFIG)
