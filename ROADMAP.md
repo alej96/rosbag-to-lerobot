@@ -40,13 +40,20 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       frames away, and `split_idle_gap_s` only ever needed their timestamps. It now keeps
       the raw message and decodes lazily (deduped) once `synchronize` knows which frames
       the output grid actually needs. First slice of the "stream extraction" item below.
-- [ ] **Stream extraction of huge bags.** `extract_streams`/`extract_image_streams` still
-      hold every sample of one bag in memory before sync, and `convert` holds every bag's
-      synchronized episodes (now lazily-decoded frames included) in memory before
-      `write_dataset` runs once at the end. For a single bag that is itself huge (hours of
-      data, or dense video), or a conversion of many bags, that still blows up memory.
-      Needs incremental/windowed resampling in `sync.py` and writing episodes as they're
-      produced instead of batching, so a conversion can be read and written in pieces.
+- [x] **Write each bag's episode as it's produced, not after every bag.** `convert` used
+      to synchronize every bag into one list of episodes (decoded video frames included)
+      before calling `write_dataset` once at the end; `write_dataset` now consumes
+      episodes one at a time (encoding each episode's video frames as they arrive instead
+      of collecting every frame first), and the `ConversionReport`s `convert` returns no
+      longer pin each episode's bulk value/image arrays in memory afterwards. A
+      conversion of many bags now peaks at the memory of its largest single bag, not the
+      sum of all of them. Second slice of the "stream extraction" item below.
+- [ ] **Stream extraction of a single huge bag.** `extract_streams`/`extract_image_streams`
+      still hold every sample of one bag in memory before sync runs. For a bag that is
+      itself huge (hours of data, or dense video, in one file), that still blows up
+      memory even though a conversion of many such bags no longer does (shipped above).
+      Needs incremental/windowed resampling in `sync.py`, so even one bag can be read and
+      synchronized in pieces instead of loading all of it first.
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
@@ -105,3 +112,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   configured fps no longer wastes memory and CPU decoding frames that get thrown away.
   First slice of the "stream extraction of huge bags" item; batching every bag's episodes
   in memory before `write_dataset` runs is the remaining follow-up.
+- 2026-10-20: `write_dataset` consumes episodes one at a time instead of requiring a
+  materialized list, encoding each episode's video frames as they arrive instead of
+  collecting every episode's decoded frames before writing one video; `convert`'s
+  generator drops each episode's bulk value/image arrays once it's written, instead of
+  the reports it returns pinning them in memory for the rest of the conversion. A
+  conversion of many bags now peaks at the memory of its largest single bag. Second
+  slice of "stream extraction of huge bags"; incrementally resampling a single huge bag
+  is the remaining follow-up.

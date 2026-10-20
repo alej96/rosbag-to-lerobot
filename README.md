@@ -128,9 +128,11 @@ files, e.g. to stay under a Hub upload limit:
 bag2lerobot convert run*/ -c cfg.yaml -o ./ds --max-data-file-mb 20
 ```
 
-Reading still holds one bag's extracted samples and decoded frames in memory at a time;
-converting bags that are individually huge (hours of data, or video, in one file) is not
-yet streamed and is tracked as a follow-up.
+Bags are read, synchronized and written one at a time: converting many bags doesn't
+hold every bag's episode (decoded video frames included) in memory before writing, only
+the one currently being processed. A single bag that is itself huge (hours of data, or
+video, in one file) still loads that one bag's samples and decoded frames in full before
+writing it, which is not yet streamed and is tracked as a follow-up.
 
 ## Development
 
