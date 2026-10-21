@@ -1,5 +1,6 @@
 import json
 
+import pandas as pd
 import pytest
 
 from bag2lerobot.cli import main
@@ -7,6 +8,7 @@ from bag2lerobot.config import ConfigError, load_config, parse_config
 from bag2lerobot.convert import convert, preview_splits
 from bag2lerobot.extract import (
     ExtractError,
+    csv_windows,
     extract_image_streams,
     extract_streams,
     idle_gap_boundaries,
@@ -67,6 +69,31 @@ def idle_gap_config_file(tmp_path):
     path = tmp_path / "idle_gap.yaml"
     path.write_text(IDLE_GAP_CONFIG)
     return path
+
+
+CSV_SPLIT_CONFIG = """
+fps: 30
+task: pick the cube
+split_csv: {csv_path}
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+  action:
+    topic: /leader/joint_states
+    field: position
+    names_from: name
+"""
+
+
+@pytest.fixture
+def csv_split_config_file(tmp_path):
+    csv_path = tmp_path / "episodes.csv"
+    csv_path.write_text("start,end,task\n0.0,1.5,pick red cube\n1.5,3.0,pick blue cube\n")
+    cfg_path = tmp_path / "csv_split.yaml"
+    cfg_path.write_text(CSV_SPLIT_CONFIG.format(csv_path=csv_path))
+    return cfg_path, csv_path
 
 
 def test_split_on_must_be_a_string():
@@ -231,5 +258,126 @@ def test_idle_gap_split_output_loads_in_lerobot(make_bag, idle_gap_config_file, 
     assert len(reports) == 2
 
     ds = lerobot_dataset.LeRobotDataset("local/bag2lerobot-idle-gap-test", root=out)
+    assert ds.num_episodes == 2
+    assert ds.fps == 30
+
+
+def test_split_csv_must_be_a_string():
+    with pytest.raises(ConfigError, match="split_csv"):
+        parse_config({"fps": 30, "split_csv": 3, "features": {"a": {"topic": "/t"}}})
+
+
+def test_split_csv_and_split_on_mutually_exclusive():
+    with pytest.raises(ConfigError, match="split_on.*split_csv"):
+        parse_config(
+            {
+                "fps": 30,
+                "split_on": "/episode_start",
+                "split_csv": "episodes.csv",
+                "features": {"a": {"topic": "/t"}},
+            }
+        )
+
+
+def test_csv_windows_reads_ranges(make_bag, tmp_path):
+    bag = make_bag(spec=BagSpec(seconds=3.0))
+    cfg = _split_cfg()
+    streams = extract_streams(bag, cfg)
+    csv_path = tmp_path / "episodes.csv"
+    csv_path.write_text("start,end,task\n0.0,1.5,pick red cube\n1.5,3.0,\n")
+
+    windows = csv_windows(csv_path, streams, extract_image_streams(bag, cfg))
+
+    assert len(windows) == 2
+    (start0, end0), task0 = windows[0]
+    (start1, end1), task1 = windows[1]
+    assert start0 == pytest.approx(T0, abs=0.02)
+    assert end0 == pytest.approx(T0 + 1.5, abs=0.02)
+    assert end0 == pytest.approx(start1, abs=1e-6)
+    assert end1 == pytest.approx(T0 + 3.0, abs=0.02)
+    assert task0 == "pick red cube"
+    assert task1 is None
+
+
+def test_csv_windows_missing_file(make_bag, tmp_path):
+    bag = make_bag()
+    cfg = _split_cfg()
+    streams = extract_streams(bag, cfg)
+    with pytest.raises(ExtractError, match="not found"):
+        csv_windows(tmp_path / "nope.csv", streams, extract_image_streams(bag, cfg))
+
+
+def test_csv_windows_needs_start_end_columns(make_bag, tmp_path):
+    bag = make_bag()
+    cfg = _split_cfg()
+    streams = extract_streams(bag, cfg)
+    csv_path = tmp_path / "bad.csv"
+    csv_path.write_text("begin,finish\n0.0,1.0\n")
+    with pytest.raises(ExtractError, match="start.*end"):
+        csv_windows(csv_path, streams, extract_image_streams(bag, cfg))
+
+
+def test_csv_windows_rejects_end_before_start(make_bag, tmp_path):
+    bag = make_bag()
+    cfg = _split_cfg()
+    streams = extract_streams(bag, cfg)
+    csv_path = tmp_path / "bad.csv"
+    csv_path.write_text("start,end\n1.0,0.5\n")
+    with pytest.raises(ExtractError, match="row 1"):
+        csv_windows(csv_path, streams, extract_image_streams(bag, cfg))
+
+
+def test_convert_splits_on_csv_ranges(make_bag, csv_split_config_file, tmp_path):
+    cfg_path, _ = csv_split_config_file
+    bag = make_bag(spec=BagSpec(seconds=3.0))
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(cfg_path), out)
+
+    assert len(reports) == 2
+    assert [r.segment for r in reports] == [0, 1]
+    # episode 0 spans ~[0.2, 1.5)s (leader starts 0.2s late), episode 1 spans ~[1.5, 3.0)s
+    assert 35 <= reports[0].sync.frames <= 41
+    assert 42 <= reports[1].sync.frames <= 46
+
+    info = json.loads((out / "meta" / "info.json").read_text())
+    assert info["total_episodes"] == 2
+    assert info["total_tasks"] == 2
+    tasks_df = pd.read_parquet(out / "meta" / "tasks.parquet")
+    assert set(tasks_df.index) == {"pick red cube", "pick blue cube"}
+
+
+def test_preview_splits_with_csv(make_bag, csv_split_config_file, tmp_path):
+    cfg_path, _ = csv_split_config_file
+    bag = make_bag(spec=BagSpec(seconds=3.0))
+    cfg = load_config(cfg_path)
+    windows = preview_splits([bag], cfg)
+    assert len(windows[bag]) == 2
+    assert windows[bag][0][1] == "pick red cube"
+    assert windows[bag][1][1] == "pick blue cube"
+    assert not (tmp_path / "ds").exists()
+
+
+def test_cli_dry_run_with_csv(make_bag, csv_split_config_file, tmp_path, capsys):
+    cfg_path, csv_path = csv_split_config_file
+    bag = make_bag(spec=BagSpec(seconds=3.0))
+    assert main(["convert", str(bag), "-c", str(cfg_path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "2 episode(s)" in out
+    assert str(csv_path) in out
+    assert "pick red cube" in out
+    assert not (tmp_path / "ds").exists()
+
+
+@pytest.mark.lerobot
+def test_csv_split_output_loads_in_lerobot(make_bag, csv_split_config_file, tmp_path):
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    cfg_path, _ = csv_split_config_file
+
+    bag = make_bag(spec=BagSpec(seconds=3.0))
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(cfg_path), out)
+    assert len(reports) == 2
+
+    ds = lerobot_dataset.LeRobotDataset("local/bag2lerobot-csv-split-test", root=out)
     assert ds.num_episodes == 2
     assert ds.fps == 30

@@ -36,6 +36,7 @@ class Config:
     trim_to_overlap: bool = True
     split_on: str | None = None  # topic whose messages mark episode-start boundaries
     split_idle_gap_s: float | None = None  # idle gap (s) across all streams that splits episodes
+    split_csv: str | None = None  # CSV of start,end[,task] ranges that mark episode boundaries
     extra: dict = field(default_factory=dict)
 
     def feature(self, key: str) -> FeatureSpec:
@@ -107,8 +108,23 @@ def parse_config(data: dict) -> Config:
     split_idle_gap_s = data.get("split_idle_gap_s")
     if split_idle_gap_s is not None:
         split_idle_gap_s = float(split_idle_gap_s)
-    if split_on and split_idle_gap_s:
-        raise ConfigError("'split_on' and 'split_idle_gap_s' can't both be set")
+    split_csv = data.get("split_csv")
+    if split_csv is not None and not isinstance(split_csv, str):
+        raise ConfigError("'split_csv' must be a path to a CSV file (string)")
+    set_splits = [
+        name
+        for name, val in (
+            ("split_on", split_on),
+            ("split_idle_gap_s", split_idle_gap_s),
+            ("split_csv", split_csv),
+        )
+        if val
+    ]
+    if len(set_splits) > 1:
+        raise ConfigError(
+            f"only one of 'split_on', 'split_idle_gap_s', 'split_csv' can be set "
+            f"(got {', '.join(set_splits)})"
+        )
     cfg = Config(
         fps=float(data["fps"]),
         features=features,
@@ -120,6 +136,7 @@ def parse_config(data: dict) -> Config:
         trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
         split_on=split_on or None,
         split_idle_gap_s=split_idle_gap_s,
+        split_csv=split_csv or None,
     )
     if cfg.fps <= 0:
         raise ConfigError("'fps' must be positive")

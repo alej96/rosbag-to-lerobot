@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -223,6 +224,49 @@ def idle_gap_boundaries(
     gaps = np.diff(t)
     idle = np.flatnonzero(gaps >= min_gap_s)
     return [float(t[0]), *(float(t[i + 1]) for i in idle)]
+
+
+def csv_windows(
+    csv_path: str | Path, streams: dict[str, Stream], image_streams: dict[str, ImageStream]
+) -> list[tuple[tuple[float, float], str | None]]:
+    """Episode ``(start, end)`` windows (absolute, s) and optional per-episode task from a CSV
+    of ``start,end[,task]`` rows, e.g. written by an external annotation tool.
+
+    ``start``/``end`` are seconds since the earliest sample across every configured stream
+    (the same anchor ``idle_gap_boundaries`` uses for its first boundary), not bag/header
+    epoch time, since that's what an external tool labeling a recording would know. Rows
+    are read in file order; each becomes one episode in that order, independent of the
+    others (unlike ``split_boundaries``, a row's end doesn't have to be the next row's
+    start, so gaps between labeled ranges are simply excluded).
+    """
+    arrays = [s.times for s in streams.values()] + [s.times for s in image_streams.values()]
+    if not arrays or all(a.size == 0 for a in arrays):
+        raise ExtractError("no data to anchor 'split_csv' time ranges")
+    anchor = min(float(a[0]) for a in arrays)
+
+    path = Path(csv_path)
+    if not path.exists():
+        raise ExtractError(f"split_csv file not found: {path}")
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        if "start" not in fields or "end" not in fields:
+            raise ExtractError(f"{path}: csv needs 'start' and 'end' columns, got {fields}")
+        windows = []
+        for i, row in enumerate(reader, start=1):
+            try:
+                start, end = float(row["start"]), float(row["end"])
+            except (TypeError, ValueError):
+                raise ExtractError(
+                    f"{path}: row {i} has non-numeric start/end ({row['start']!r}, {row['end']!r})"
+                ) from None
+            if end <= start:
+                raise ExtractError(f"{path}: row {i} has end ({end}) <= start ({start})")
+            task = (row.get("task") or "").strip() or None
+            windows.append(((anchor + start, anchor + end), task))
+    if not windows:
+        raise ExtractError(f"{path}: no episode rows found")
+    return windows
 
 
 def decode_image(msg) -> np.ndarray:
