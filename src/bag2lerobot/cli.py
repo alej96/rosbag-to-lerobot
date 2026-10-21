@@ -60,7 +60,8 @@ def _parser() -> argparse.ArgumentParser:
     conv.add_argument(
         "--dry-run",
         action="store_true",
-        help="print the episode boundaries from 'split_on' or 'split_idle_gap_s' and exit",
+        help="print the episode boundaries from 'split_on', 'split_idle_gap_s' or "
+        "'split_csv' and exit",
     )
     conv.add_argument(
         "--push-to-hub",
@@ -113,18 +114,26 @@ def _init(args) -> int:
 
 
 def _dry_run(args, cfg) -> int:
-    if not cfg.split_on and not cfg.split_idle_gap_s:
+    if not (cfg.split_on or cfg.split_idle_gap_s or cfg.split_csv):
         print(
-            "bag2lerobot: --dry-run needs 'split_on' or 'split_idle_gap_s' in the config",
+            "bag2lerobot: --dry-run needs 'split_on', 'split_idle_gap_s' or 'split_csv' "
+            "in the config",
             file=sys.stderr,
         )
         return 2
-    source = f"'{cfg.split_on}'" if cfg.split_on else f"idle gaps >= {cfg.split_idle_gap_s:g}s"
-    for bag, boundaries in preview_splits(args.bags, cfg).items():
-        print(f"{bag.name}: {len(boundaries)} episode(s) on {source}")
-        for i, start in enumerate(boundaries):
-            end = f"{boundaries[i + 1]:.3f}s" if i + 1 < len(boundaries) else "end"
-            print(f"  ep {i}: {start:.3f}s -> {end}")
+    if cfg.split_csv:
+        source = f"'{cfg.split_csv}'"
+    elif cfg.split_on:
+        source = f"'{cfg.split_on}'"
+    else:
+        source = f"idle gaps >= {cfg.split_idle_gap_s:g}s"
+    for bag, windows in preview_splits(args.bags, cfg).items():
+        print(f"{bag.name}: {len(windows)} episode(s) on {source}")
+        for i, (window, task) in enumerate(windows):
+            start, end = window
+            end_s = "end" if end == float("inf") else f"{end:.3f}s"
+            task_s = f"  [{task}]" if task else ""
+            print(f"  ep {i}: {start:.3f}s -> {end_s}{task_s}")
     return 0
 
 
@@ -152,7 +161,7 @@ def _convert(args) -> int:
     action = "appended" if args.append else "wrote"
     print(f"{action} {len(reports)} episode(s), {total} frames at {cfg.fps:g} fps to {args.out}")
     any_stale = False
-    splitting = cfg.split_on or cfg.split_idle_gap_s
+    splitting = cfg.split_on or cfg.split_idle_gap_s or cfg.split_csv
     for i, r in enumerate(reports):
         s = r.sync
         label = r.bag.name if not splitting else f"{r.bag.name} seg {r.segment}"

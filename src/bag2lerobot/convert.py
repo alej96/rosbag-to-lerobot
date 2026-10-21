@@ -9,6 +9,7 @@ from pathlib import Path
 
 from bag2lerobot.config import Config
 from bag2lerobot.extract import (
+    csv_windows,
     extract_image_streams,
     extract_streams,
     idle_gap_boundaries,
@@ -30,23 +31,38 @@ def _windows(boundaries: list[float]) -> list[tuple[float, float]]:
     return list(zip(boundaries, ends, strict=True))
 
 
-def _boundaries(bag: Path, cfg: Config, streams=None, image_streams=None) -> list[float] | None:
+def _episode_windows(
+    bag: Path, cfg: Config, streams=None, image_streams=None
+) -> list[tuple[tuple[float, float], str | None]] | None:
+    """Each episode's ``(window, task)`` for one bag, or ``None`` when no splitting is
+    configured (the whole bag is one episode). ``task`` is ``None`` unless ``split_csv``
+    gives a per-episode task, in which case it overrides ``cfg.task`` for that episode."""
     if cfg.split_on:
-        return split_boundaries(bag, cfg.split_on, cfg)
-    if cfg.split_idle_gap_s:
+        return [(w, None) for w in _windows(split_boundaries(bag, cfg.split_on, cfg))]
+    if cfg.split_idle_gap_s or cfg.split_csv:
         if streams is None:
             streams = extract_streams(bag, cfg)
         if image_streams is None:
             image_streams = extract_image_streams(bag, cfg)
-        return idle_gap_boundaries(streams, image_streams, cfg.split_idle_gap_s)
+        if cfg.split_csv:
+            return csv_windows(cfg.split_csv, streams, image_streams)
+        return [
+            (w, None)
+            for w in _windows(idle_gap_boundaries(streams, image_streams, cfg.split_idle_gap_s))
+        ]
     return None
 
 
-def preview_splits(bags: list[Path], cfg: Config) -> dict[Path, list[float]]:
-    """Episode-start timestamps (s) ``convert`` would split each bag on, without writing."""
-    if not cfg.split_on and not cfg.split_idle_gap_s:
-        raise ValueError("config has no 'split_on' topic or 'split_idle_gap_s' to preview")
-    return {Path(bag): _boundaries(Path(bag), cfg) for bag in bags}
+def preview_splits(
+    bags: list[Path], cfg: Config
+) -> dict[Path, list[tuple[tuple[float, float], str | None]]]:
+    """Each episode's ``(window, task)`` ``convert`` would split each bag into, without
+    writing anything."""
+    if not (cfg.split_on or cfg.split_idle_gap_s or cfg.split_csv):
+        raise ValueError(
+            "config has no 'split_on' topic, 'split_idle_gap_s' or 'split_csv' to preview"
+        )
+    return {Path(bag): _episode_windows(Path(bag), cfg) for bag in bags}
 
 
 def convert(
@@ -62,7 +78,9 @@ def convert(
     When ``cfg.split_on`` is set, each bag is split into multiple episodes at the
     timestamps of messages on that topic (see ``extract.split_boundaries``). When
     ``cfg.split_idle_gap_s`` is set instead, each bag is split wherever every stream goes
-    idle for at least that long (see ``extract.idle_gap_boundaries``). Otherwise each bag
+    idle for at least that long (see ``extract.idle_gap_boundaries``). When
+    ``cfg.split_csv`` is set, episode windows (and optionally a per-episode task) come
+    from a CSV of time ranges instead (see ``extract.csv_windows``). Otherwise each bag
     becomes exactly one episode. With ``append=True``, episodes are added to the dataset
     already at ``out`` instead of replacing it (``out`` must hold one written by a
     previous ``convert`` call, with matching fps and features). ``max_data_file_mb`` caps
@@ -96,12 +114,12 @@ def convert(
         for bag in bags:
             streams = extract_streams(bag, cfg, joint_order)
             image_streams = extract_image_streams(bag, cfg)
-            boundaries = _boundaries(bag, cfg, streams, image_streams)
-            windows = _windows(boundaries) if boundaries is not None else [None]
-            for segment, window in enumerate(windows):
+            episode_windows = _episode_windows(bag, cfg, streams, image_streams)
+            episode_windows = episode_windows if episode_windows is not None else [(None, None)]
+            for segment, (window, task) in enumerate(episode_windows):
                 result = synchronize(streams, cfg, image_streams, window=window)
                 reports.append(ConversionReport(Path(bag), result, segment))
-                yield Episode(result, cfg.task)
+                yield Episode(result, task or cfg.task)
                 # write_dataset has already written (and, for images, encoded) this
                 # episode by the time it asks for the next one: drop the per-frame
                 # data so the kept `reports` list doesn't pin every bag's values and
