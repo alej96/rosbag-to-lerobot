@@ -66,8 +66,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       wherever every configured stream goes idle for at least that long, reusing the
       `--dry-run` machinery added for topic-based splitting. Follow-up below covers the
       other splitting source from the original item (CSV time ranges).
-- [ ] **Episode splitting on time ranges from a CSV.** Split a bag into episodes from a
-      CSV of time ranges, reusing the `split_on`/`--dry-run` machinery.
+- [x] **Episode splitting on time ranges from a CSV.** `split_csv` splits a bag into
+      episodes from a CSV of `start,end[,task]` rows (seconds since the first configured
+      sample), for demos already labeled by an external tool; a row's `task` overrides
+      the config's `task` for that episode. Reuses the `--dry-run` machinery added for
+      the other two splitting sources.
 
 ## Needs the owner
 
@@ -120,3 +123,9 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   conversion of many bags now peaks at the memory of its largest single bag. Second
   slice of "stream extraction of huge bags"; incrementally resampling a single huge bag
   is the remaining follow-up.
+- 2026-10-21: `split_csv` splits a bag into episodes from a CSV of `start,end[,task]`
+  ranges (seconds since the first configured sample), for logs whose demos are already
+  labeled by an external tool rather than a topic or idle gaps; a row's `task` column
+  overrides the config's `task` for that one episode. `--dry-run` and `preview_splits`
+  now report windows (and any per-episode task) uniformly across all three splitting
+  sources instead of `split_on`/`split_idle_gap_s`-only start lists.
