@@ -21,9 +21,10 @@ one small YAML file.
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra. Only the
   frames the output grid actually samples are decoded, so a camera recorded faster than
   the configured `fps` doesn't waste memory decoding frames that get thrown away.
-- Splits one bag with many demos into multiple episodes, either on a topic (`split_on`)
-  or automatically wherever every stream goes idle (`split_idle_gap_s`), with
-  `convert --dry-run` to preview the boundaries before writing anything
+- Splits one bag with many demos into multiple episodes: on a topic (`split_on`),
+  automatically wherever every stream goes idle (`split_idle_gap_s`), or from a CSV of
+  time ranges labeled by an external tool (`split_csv`, optionally with a per-episode
+  task), with `convert --dry-run` to preview the boundaries before writing anything
 - `--append` adds episodes to an existing dataset instead of starting over, checking
   that fps and features still match
 - `--max-data-file-mb` caps the size of each data parquet file (default 100MB, matching
@@ -99,7 +100,27 @@ data is dropped (unlike `split_on`, the first sample starts the first episode).
 split_idle_gap_s: 2.0
 ```
 
-`split_on` and `split_idle_gap_s` can't both be set; `--dry-run` previews either one.
+If demos are already labeled with time ranges by an external tool (e.g. a video
+annotation UI), set `split_csv` to a CSV file of `start,end` columns in seconds since the
+first configured sample, plus an optional `task` column to override the config's `task`
+per episode:
+
+```yaml
+split_csv: episodes.csv
+```
+
+```csv
+start,end,task
+0.0,4.2,pick the red cube
+4.2,9.8,pick the blue cube
+```
+
+Each row becomes one episode, independent of the others (a gap between two rows is
+simply excluded, unlike `split_on` where every sample belongs to some episode); rows
+don't need to be contiguous or sorted.
+
+`split_on`, `split_idle_gap_s` and `split_csv` are mutually exclusive; `--dry-run`
+previews whichever one is set.
 
 ### Adding more episodes later
 
