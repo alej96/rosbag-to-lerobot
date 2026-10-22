@@ -34,6 +34,8 @@ one small YAML file.
   conversion doesn't start from a blank YAML file
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
   dataset card (source bags, sync quality, features); needs the `hub` extra
+- `msg_dir` registers custom message types from `.msg` files for bags that use types
+  `rosbags` doesn't ship and that aren't embedded in the bag itself
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
 
 ## Install
@@ -154,6 +156,36 @@ hold every bag's episode (decoded video frames included) in memory before writin
 the one currently being processed. A single bag that is itself huge (hours of data, or
 video, in one file) still loads that one bag's samples and decoded frames in full before
 writing it, which is not yet streamed and is tracked as a follow-up.
+
+### Custom message types
+
+Most bags carry their own message definitions, so `bag2lerobot` reads them without a ROS
+install even for custom (non-standard) message types. Some ROS 2 storage plugins and
+older distros only record a topic's type *name*, though, not its field layout; reading
+one of those for a type `rosbags` doesn't already know raises an error naming the type
+and pointing at `msg_dir`. Point `msg_dir` at a directory laid out the way a ROS package
+is, one `.msg` file per type:
+
+```
+custom_msgs/
+  gripper_msgs/
+    msg/
+      GripperCmd.msg
+```
+
+```yaml
+msg_dir: custom_msgs
+```
+
+`inspect` and `init` take the same thing as `--msg-dir`, since they run before a config
+exists:
+
+```bash
+bag2lerobot inspect my_run.mcap_dir/ --msg-dir custom_msgs/
+bag2lerobot init my_run.mcap_dir/ --msg-dir custom_msgs/ -o cfg.yaml   # carries msg_dir into cfg.yaml
+```
+
+`convert` also accepts `--msg-dir` as a one-off override of the config's `msg_dir`.
 
 ## Development
 
