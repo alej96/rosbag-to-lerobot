@@ -37,6 +37,7 @@ class Config:
     split_on: str | None = None  # topic whose messages mark episode-start boundaries
     split_idle_gap_s: float | None = None  # idle gap (s) across all streams that splits episodes
     split_csv: str | None = None  # CSV of start,end[,task] ranges that mark episode boundaries
+    msg_dir: str | None = None  # directory of custom <package>/msg/*.msg definitions
     extra: dict = field(default_factory=dict)
 
     def feature(self, key: str) -> FeatureSpec:
@@ -111,6 +112,11 @@ def parse_config(data: dict) -> Config:
     split_csv = data.get("split_csv")
     if split_csv is not None and not isinstance(split_csv, str):
         raise ConfigError("'split_csv' must be a path to a CSV file (string)")
+    msg_dir = data.get("msg_dir")
+    if msg_dir is not None and not isinstance(msg_dir, str):
+        raise ConfigError(
+            "'msg_dir' must be a path to a directory of custom '<package>/msg/*.msg' files"
+        )
     set_splits = [
         name
         for name, val in (
@@ -137,6 +143,7 @@ def parse_config(data: dict) -> Config:
         split_on=split_on or None,
         split_idle_gap_s=split_idle_gap_s,
         split_csv=split_csv or None,
+        msg_dir=msg_dir or None,
     )
     if cfg.fps <= 0:
         raise ConfigError("'fps' must be positive")
@@ -146,4 +153,6 @@ def parse_config(data: dict) -> Config:
         raise ConfigError(f"time_source must be one of {TIME_SOURCES}, got '{cfg.time_source}'")
     if cfg.split_idle_gap_s is not None and cfg.split_idle_gap_s <= 0:
         raise ConfigError("'split_idle_gap_s' must be positive")
+    if cfg.msg_dir is not None and not Path(cfg.msg_dir).is_dir():
+        raise ConfigError(f"msg_dir '{cfg.msg_dir}' is not a directory")
     return cfg

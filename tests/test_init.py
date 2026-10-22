@@ -82,14 +82,14 @@ def test_generate_config_fps_override(make_bag):
 
 
 def test_generate_config_empty_bag_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(init_mod, "inspect_bag", lambda path: [])
+    monkeypatch.setattr(init_mod, "inspect_bag", lambda path, msg_dir=None: [])
     with pytest.raises(ExtractError):
         generate_config(tmp_path / "x")
 
 
 def test_generate_config_no_candidates_raises(monkeypatch, tmp_path):
     topics = [TopicInfo("/ee_pose", "geometry_msgs/msg/PoseStamped", 10, 1.0)]
-    monkeypatch.setattr(init_mod, "inspect_bag", lambda path: topics)
+    monkeypatch.setattr(init_mod, "inspect_bag", lambda path, msg_dir=None: topics)
     with pytest.raises(ExtractError):
         generate_config(tmp_path / "x")
 

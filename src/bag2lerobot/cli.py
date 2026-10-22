@@ -22,10 +22,17 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"bag2lerobot {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
+    msg_dir_help = (
+        "directory of custom message definitions, laid out like a ROS package "
+        "('<package>/msg/<Name>.msg'), for bags using types rosbags doesn't ship and "
+        "that aren't embedded in the bag itself"
+    )
+
     ins = sub.add_parser("inspect", help="list topics, message types and rates in a bag")
     ins.add_argument(
         "bag", type=Path, help="ROS 1 .bag file, or ROS 2 bag directory (sqlite3/mcap)"
     )
+    ins.add_argument("--msg-dir", type=Path, help=msg_dir_help)
 
     ini = sub.add_parser("init", help="generate a starter config from a bag's topics")
     ini.add_argument(
@@ -35,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     ini.add_argument(
         "--fps", type=float, help="output frame rate (default: fastest JointState topic's rate)"
     )
+    ini.add_argument("--msg-dir", type=Path, help=msg_dir_help)
 
     conv = sub.add_parser("convert", help="convert bags into a LeRobot dataset")
     conv.add_argument("bags", type=Path, nargs="+", help="one episode per bag")
@@ -71,6 +79,7 @@ def _parser() -> argparse.ArgumentParser:
     conv.add_argument(
         "--private", action="store_true", help="make the Hub repo private (with --push-to-hub)"
     )
+    conv.add_argument("--msg-dir", type=Path, help=f"{msg_dir_help} (overrides the config)")
     return p
 
 
@@ -95,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _inspect(args) -> int:
-    topics = inspect_bag(args.bag)
+    topics = inspect_bag(args.bag, args.msg_dir)
     width = max((len(t.topic) for t in topics), default=5)
     print(f"{'topic':<{width}}  {'type':<40} {'msgs':>7} {'rate':>9}")
     for t in topics:
@@ -104,7 +113,7 @@ def _inspect(args) -> int:
 
 
 def _init(args) -> int:
-    text = generate_config(args.bag, fps=args.fps)
+    text = generate_config(args.bag, fps=args.fps, msg_dir=args.msg_dir)
     if args.out:
         args.out.write_text(text)
         print(f"wrote {args.out}")
@@ -141,6 +150,8 @@ def _convert(args) -> int:
     cfg = load_config(args.config)
     if args.task:
         cfg.task = args.task
+    if args.msg_dir:
+        cfg.msg_dir = str(args.msg_dir)
     if args.dry_run:
         return _dry_run(args, cfg)
     if not args.out:

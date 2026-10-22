@@ -60,15 +60,20 @@ def _camera_names(topics: list[str]) -> dict[str, str]:
     return names
 
 
-def generate_config(path: str | Path, fps: float | None = None) -> str:
+def generate_config(
+    path: str | Path, fps: float | None = None, msg_dir: str | Path | None = None
+) -> str:
     """Build a starter YAML config from the topics found in the bag at ``path``.
 
     JointState topics become ``observation.state``/``action`` candidates (picked by
     name hints like "leader"/"follower", falling back to topic order); Image and
     CompressedImage topics become ``observation.images.*`` video features. The result
     loads with ``load_config`` as-is, but comments point out guesses to double check.
+    ``msg_dir``, when the bag uses custom message types rosbags doesn't ship (see
+    ``extract._custom_types``), is carried into the generated config so later ``convert``
+    calls pick it up too.
     """
-    topics = inspect_bag(path)
+    topics = inspect_bag(path, msg_dir)
     if not topics:
         raise ExtractError(f"{path}: no messages found")
 
@@ -96,8 +101,10 @@ def generate_config(path: str | Path, fps: float | None = None) -> str:
         f"fps: {fps}",
         "robot_type:",
         "task:  # e.g. 'pick the cube'",
-        "features:",
     ]
+    if msg_dir:
+        lines.append(f"msg_dir: {msg_dir}")
+    lines.append("features:")
     for key, topic, is_guess in _assign_joint_roles(joint_topics):
         suffix = "  # check: is this really state/action?" if is_guess else ""
         lines += [
