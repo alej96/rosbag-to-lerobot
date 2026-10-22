@@ -5,11 +5,12 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 from rosbags.highlevel import AnyReader
-from rosbags.typesys import Stores, get_typestore
+from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 
 from bag2lerobot.config import Config, FeatureSpec
 
@@ -66,18 +67,57 @@ class ExtractError(ValueError):
     pass
 
 
-def _reader(path: Path) -> AnyReader:
-    # ROS 2 bags carry their message definitions; the default store covers ROS 1 bags
-    # and ROS 2 bags recorded without definitions.
-    return AnyReader([Path(path)], default_typestore=get_typestore(Stores.LATEST))
+@lru_cache(maxsize=8)
+def _typestore(msg_dir: str | None):
+    store = get_typestore(Stores.LATEST)
+    if msg_dir:
+        store.register(_custom_types(Path(msg_dir)))
+    return store
 
 
-def inspect_bag(path: str | Path) -> list[TopicInfo]:
+def _custom_types(msg_dir: Path) -> dict:
+    """Parse every ``<package>/msg/<Name>.msg`` file under ``msg_dir`` (the layout of a
+    ROS package's message definitions) into a typesdict ready for ``Typestore.register``."""
+    if not msg_dir.is_dir():
+        raise ExtractError(f"msg_dir '{msg_dir}' is not a directory")
+    msg_files = sorted(msg_dir.glob("*/msg/*.msg"))
+    if not msg_files:
+        raise ExtractError(
+            f"msg_dir '{msg_dir}': no '<package>/msg/*.msg' files found; lay out custom "
+            "definitions the same way a ROS package would (e.g. 'my_pkg/msg/MyMsg.msg')"
+        )
+    types: dict = {}
+    for msg_file in msg_files:
+        name = f"{msg_file.parent.parent.name}/msg/{msg_file.stem}"
+        types.update(get_types_from_msg(msg_file.read_text(), name))
+    return types
+
+
+def _reader(path: Path, msg_dir: str | Path | None = None) -> AnyReader:
+    # Most bags carry their own message definitions; a bag recorded without them (seen
+    # on some ROS 2 distros/storage plugins for message types outside the bundled
+    # standard interfaces) falls back to this default typestore, extended with 'msg_dir'
+    # when the config or CLI points at custom '.msg' files.
+    return AnyReader([Path(path)], default_typestore=_typestore(str(msg_dir) if msg_dir else None))
+
+
+def _deserialize(reader: AnyReader, raw: bytes, conn, path: str | Path):
+    try:
+        return reader.deserialize(raw, conn.msgtype)
+    except KeyError as exc:
+        raise ExtractError(
+            f"{path}: '{conn.msgtype}' on '{conn.topic}' has no known definition (not bundled "
+            "with rosbags and not embedded in the bag); set 'msg_dir' to a directory with its "
+            f"'<package>/msg/{conn.msgtype.rsplit('/', 1)[-1]}.msg' file"
+        ) from exc
+
+
+def inspect_bag(path: str | Path, msg_dir: str | Path | None = None) -> list[TopicInfo]:
     counts: Counter[str] = Counter()
     first: dict[str, int] = {}
     last: dict[str, int] = {}
     types: dict[str, str] = {}
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), msg_dir) as reader:
         for conn, t, _ in reader.messages():
             counts[conn.topic] += 1
             first.setdefault(conn.topic, t)
@@ -105,7 +145,7 @@ def extract_streams(
 
     samples: dict[str, tuple[list[float], list[np.ndarray]]] = {s.key: ([], []) for s in specs}
     names: dict[str, list[str]] = {}
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), cfg.msg_dir) as reader:
         available = {c.topic for c in reader.connections}
         missing = sorted(set(by_topic) - available)
         if missing:
@@ -115,7 +155,7 @@ def extract_streams(
             )
         conns = [c for c in reader.connections if c.topic in by_topic]
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, raw, conn, path)
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
             for spec in by_topic[conn.topic]:
                 vec, vec_names = _flatten(msg, spec, joint_order)
@@ -151,7 +191,7 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
         by_topic.setdefault(spec.topic, []).append(spec)
 
     samples: dict[str, tuple[list[float], list]] = {s.key: ([], []) for s in specs}
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), cfg.msg_dir) as reader:
         available = {c.topic for c in reader.connections}
         missing = sorted(set(by_topic) - available)
         if missing:
@@ -161,7 +201,7 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
             )
         conns = [c for c in reader.connections if c.topic in by_topic]
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, raw, conn, path)
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
             for spec in by_topic[conn.topic]:
                 times, frames = samples[spec.key]
@@ -187,7 +227,7 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
     every message. Each boundary marks where one episode ends and the next begins; data
     before the first boundary belongs to no episode and is dropped.
     """
-    with _reader(Path(path)) as reader:
+    with _reader(Path(path), cfg.msg_dir) as reader:
         conns = [c for c in reader.connections if c.topic == topic]
         if not conns:
             available = sorted({c.topic for c in reader.connections})
@@ -197,7 +237,7 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
         is_bool = conns[0].msgtype.endswith("Bool")
         times = []
         for conn, bag_t, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
+            msg = _deserialize(reader, raw, conn, path)
             if is_bool and not bool(msg.data):
                 continue
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
