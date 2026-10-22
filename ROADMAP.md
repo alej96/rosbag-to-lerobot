@@ -60,8 +60,10 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 - [ ] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
       plus a camera), add a `network` test tier, and record results in
       `docs/validated-bags.md`.
-- [ ] **Custom message types** from `.msg` files (`--msg-dir`) for ROS 1/2 bags recorded
-      without embedded definitions.
+- [x] **Custom message types** from `.msg` files (`msg_dir`/`--msg-dir`) for bags whose
+      types aren't bundled with `rosbags` and aren't embedded in the bag either (some ROS
+      2 storage plugins/distros only record the type name). `inspect`, `init` and
+      `convert` all accept it.
 - [x] **Episode splitting on idle gaps.** `split_idle_gap_s` splits a bag into episodes
       wherever every configured stream goes idle for at least that long, reusing the
       `--dry-run` machinery added for topic-based splitting. Follow-up below covers the
@@ -129,3 +131,14 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   overrides the config's `task` for that one episode. `--dry-run` and `preview_splits`
   now report windows (and any per-episode task) uniformly across all three splitting
   sources instead of `split_on`/`split_idle_gap_s`-only start lists.
+- 2026-10-22: `msg_dir` (config) / `--msg-dir` (`inspect`, `init`, `convert`) registers
+  custom message types from `.msg` files laid out like a ROS package, for bags whose
+  types `rosbags` doesn't bundle and that aren't embedded in the bag either (some ROS 2
+  storage plugins/distros only ever record a topic's type name, not its schema).
+  Deserializing such a topic used to raise a raw `KeyError`; it now raises a clear
+  `ExtractError` naming the type and pointing at `msg_dir`, with or without a custom
+  type registered. Picked over "Stream extraction of a single huge bag" (still top of
+  "Next up"): that item needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame" and
+  "timestamp == frame_index / fps" invariants on a branch that auto-merges with no
+  review; it deserves its own session rather than a rushed slice.
