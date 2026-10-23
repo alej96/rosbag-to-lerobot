@@ -20,9 +20,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       original item (CSV time ranges, idle gaps).
 - [x] **`bag2lerobot init`** generates a starter YAML from `inspect` (JointState topics
       become state and action candidates, image topics become cameras) to make the
-      first conversion quick. Follow-up: once `--msg-dir` (custom message types) or
-      `--push-to-hub` land, teach `init` to pick up non-JointState numeric topics (e.g.
-      a gripper command on `std_msgs/Float64`) as extra features too.
+      first conversion quick.
+- [x] **`init` picks up non-JointState numeric topics.** A simple numeric `std_msgs`
+      topic outside any `JointState` (e.g. a gripper command on `std_msgs/Float64`)
+      becomes an `action.<name>`/`observation.state.<name>` candidate, picked by the
+      same leader/follower-style name hints as joints.
 - [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
       writes a dataset card (source bags, sync stats, config used). Follow-up: once
       `--append` lands, re-push should update the card and only upload new/changed files
@@ -142,3 +144,18 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   bounds are still being discovered, which risks the "never drop a frame" and
   "timestamp == frame_index / fps" invariants on a branch that auto-merges with no
   review; it deserves its own session rather than a rushed slice.
+- 2026-10-23: `bag2lerobot init` now also turns a simple numeric `std_msgs` topic
+  outside any `JointState` (`Bool`, `Float32`/`Float64`, `Int*`/`UInt*`, or a
+  `*MultiArray` of one of those — e.g. a gripper command on `std_msgs/Float64`) into
+  an `action.<name>`/`observation.state.<name>` feature candidate, picked by the same
+  leader/follower-style name hints joints already use. Previously `init` ignored these
+  topics entirely, so a real teleop setup where the gripper rides on its own topic
+  (common once the arm's `JointState` doesn't include it) needed a hand-edited config
+  before the first conversion could even run. Along the way, found and fixed a
+  pre-existing `writer.py` bug the real `lerobot` loader test caught: any width-1
+  numeric feature (exactly what a scalar gripper command is) was written as a
+  length-1 list column, but LeRobot reads a `shape: [1]` feature as a scalar
+  `datasets.Value`, so loading raised `DatasetGenerationCastError`. No existing config
+  had a width-1 feature, so this was invisible until now; it would have broken any
+  single-value feature, not just the ones `init` generates. Still top of "Next up":
+  "Stream extraction of a single huge bag", for the same reason as yesterday.
