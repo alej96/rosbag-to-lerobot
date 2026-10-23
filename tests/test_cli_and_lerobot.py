@@ -126,3 +126,37 @@ def test_image_feature_loads_in_lerobot(make_bag, tmp_path):
     assert tuple(item["observation.images.cam"].shape) == (3, 6, 8)
     last = ds[len(ds) - 1]
     assert tuple(last["observation.images.cam"].shape) == (3, 6, 8)
+
+
+SCALAR_CONFIG = """
+fps: 30
+task: pick the cube
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+  action.gripper:
+    topic: /gripper/cmd
+    field: data
+"""
+
+
+@pytest.mark.lerobot
+def test_dotted_scalar_feature_loads_in_lerobot(make_bag, tmp_path):
+    """A feature key with a dot past its namespace prefix (e.g. 'action.gripper', what
+    `bag2lerobot init` now generates for a non-JointState numeric topic) is new ground:
+    only 'observation.images.<name>' used that pattern before. Make sure it's not just
+    written correctly but actually loads back through the real LeRobotDataset."""
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(SCALAR_CONFIG)
+    bag = make_bag(spec=BagSpec(extra_topics={"/gripper/cmd": 20.0}))
+    out = tmp_path / "ds"
+    assert main(["convert", str(bag), "-c", str(cfg_path), "-o", str(out)]) == 0
+
+    ds = lerobot_dataset.LeRobotDataset("local/bag2lerobot-scalar-test", root=out)
+    item = ds[0]
+    # a width-1 feature loads as a scalar, like LeRobot's own 'reward'/'done' examples,
+    # not a length-1 vector
+    assert tuple(item["action.gripper"].shape) == ()

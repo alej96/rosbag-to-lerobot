@@ -33,7 +33,7 @@ class BagSpec:
     shuffle_joints_every: int = 0  # publish follower joints in reversed order every N msgs
     jitter_s: float = 0.002
     seed: int = 0
-    extra_topics: dict[str, float] = field(default_factory=dict)
+    extra_topics: dict[str, float] = field(default_factory=dict)  # topic -> hz, std_msgs/Float64
     camera_hz: float = 0.0  # > 0 publishes /cam/image_raw (sensor_msgs/Image, rgb8)
     camera_size: tuple[int, int] = (8, 6)  # (width, height)
     compressed_camera_hz: float = 0.0  # > 0 publishes /cam/image_compressed (jpeg)
@@ -149,6 +149,10 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
                     compressed_image_msg(t),
                 )
             )
+    for topic, hz in spec.extra_topics.items():
+        for t in _times(hz, 0, spec.seconds, spec.jitter_s, rng):
+            msg = T["std_msgs/msg/Float64"](data=0.5 + 0.4 * float(np.sin(t)))
+            msgs.append((t, topic, "std_msgs/msg/Float64", msg))
     if spec.episode_starts:
         is_bool = spec.episode_start_type == "bool"
         msgtype = "std_msgs/msg/Bool" if is_bool else "std_msgs/msg/Empty"

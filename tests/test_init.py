@@ -4,7 +4,12 @@ from bag2lerobot import init as init_mod
 from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.extract import ExtractError, TopicInfo
-from bag2lerobot.init import _assign_joint_roles, _camera_names, generate_config
+from bag2lerobot.init import (
+    _assign_joint_roles,
+    _assign_scalar_roles,
+    _camera_names,
+    generate_config,
+)
 from tests.conftest import BagSpec
 
 FOLLOWER, LEADER, AUX = "/follower/joint_states", "/leader/joint_states", "/aux/joint_states"
@@ -38,6 +43,19 @@ def test_assign_joint_roles_extra_topic_is_flagged():
         ("action", LEADER, False),
         ("observation.state_2", AUX, True),
     ]
+
+
+def test_assign_scalar_roles_by_name_hint():
+    assigned = _assign_scalar_roles(["/gripper/cmd", "/gripper/state"])
+    assert assigned == [
+        ("action.gripper", "/gripper/cmd", False),
+        ("observation.state.gripper", "/gripper/state", False),
+    ]
+
+
+def test_assign_scalar_roles_no_hint_guesses_state():
+    assigned = _assign_scalar_roles(["/gripper"])
+    assert assigned == [("observation.state.gripper", "/gripper", True)]
 
 
 def test_camera_names_dedupes_on_collision():
@@ -76,6 +94,17 @@ def test_generate_config_with_camera(make_bag, tmp_path):
     assert image_feats[0].topic == "/cam/image_raw"
 
 
+def test_generate_config_with_scalar_topic(make_bag, tmp_path):
+    bag = make_bag(spec=BagSpec(extra_topics={"/gripper/cmd": 20.0}))
+    cfg_path = tmp_path / "gen.yaml"
+    cfg_path.write_text(generate_config(bag))
+    cfg = load_config(cfg_path)
+
+    feat = cfg.feature("action.gripper")
+    assert feat.topic == "/gripper/cmd"
+    assert feat.fields == ["data"]
+
+
 def test_generate_config_fps_override(make_bag):
     text = generate_config(make_bag(), fps=30)
     assert "fps: 30" in text
@@ -111,6 +140,14 @@ def test_cli_init_prints_to_stdout(make_bag, capsys):
 
 def test_generated_config_converts(make_bag, tmp_path):
     bag = make_bag()
+    cfg_path = tmp_path / "gen.yaml"
+    cfg_path.write_text(generate_config(bag).replace("task:", "task: pick the cube"))
+    out = tmp_path / "ds"
+    assert main(["convert", str(bag), "-c", str(cfg_path), "-o", str(out)]) == 0
+
+
+def test_generated_config_with_scalar_topic_converts(make_bag, tmp_path):
+    bag = make_bag(spec=BagSpec(extra_topics={"/gripper/cmd": 20.0}))
     cfg_path = tmp_path / "gen.yaml"
     cfg_path.write_text(generate_config(bag).replace("task:", "task: pick the cube"))
     out = tmp_path / "ds"
