@@ -31,7 +31,10 @@ one small YAML file.
   `info.json`'s `data_files_size_in_mb`); a large conversion is split across several data
   files instead of growing one file without bound
 - `bag2lerobot init` writes a starter config from a bag's topics, so the first
-  conversion doesn't start from a blank YAML file
+  conversion doesn't start from a blank YAML file. Besides `JointState` and image
+  topics, it also picks up simple numeric `std_msgs` topics outside any `JointState`
+  (e.g. a gripper command on `std_msgs/Float64`) as `action.<name>`/
+  `observation.state.<name>` candidates, using the same name hints as joints
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
   dataset card (source bags, sync quality, features); needs the `hub` extra
 - `msg_dir` registers custom message types from `.msg` files for bags that use types
@@ -66,9 +69,14 @@ maps a camera topic to video.
 `bag2lerobot init` looks at one bag's topics and writes a config to get a first
 conversion running: `JointState` topics become `observation.state`/`action` candidates
 (picked by name, e.g. "leader"/"follower" or "cmd"/"state"; topic order breaks ties),
-and `Image`/`CompressedImage` topics become `observation.images.*` video features. Edit
-the result before converting: fill in `task`, and double-check any feature commented
-`# check` — those are guesses `init` couldn't confirm from topic names alone.
+`Image`/`CompressedImage` topics become `observation.images.*` video features, and a
+simple numeric `std_msgs` topic outside any `JointState` (`Bool`, `Float32`/`Float64`,
+`Int*`/`UInt*`, or a `*MultiArray` of one of those) becomes an
+`action.<name>`/`observation.state.<name>` candidate — e.g. a gripper command on
+`/gripper/cmd` (`std_msgs/Float64`) becomes `action.gripper`, picked by the same
+leader/follower-style name hints as joints. Edit the result before converting: fill in
+`task`, and double-check any feature commented `# check` — those are guesses `init`
+couldn't confirm from topic names alone.
 
 ```bash
 bag2lerobot init my_run.mcap_dir/ -o cfg.yaml --fps 30
