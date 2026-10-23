@@ -48,6 +48,37 @@ def test_converts_every_bag_format(make_bag, config_file, tmp_path, kind):
     assert reports[0].sync.trimmed_start_s == pytest.approx(0.2, abs=0.03)
 
 
+SCALAR_CONFIG = """
+fps: 30
+task: pick the cube
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names_from: name
+  action.gripper:
+    topic: /gripper/cmd
+    field: data
+"""
+
+
+def test_width_one_feature_writes_scalar_column(tmp_path, make_bag):
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(SCALAR_CONFIG)
+    bag = make_bag(spec=BagSpec(extra_topics={"/gripper/cmd": 20.0}))
+    out = tmp_path / "ds"
+    convert([bag], load_config(cfg_path), out)
+    info, data, _ = _read(out)
+
+    # a width-1 feature must be a plain float column, not a length-1 list column: that's
+    # what LeRobot's hf_features reads shape [1] as (datasets.Value, not Sequence), and a
+    # list column there fails to load with a real DatasetGenerationError.
+    assert pd.api.types.is_float_dtype(data["action.gripper"])
+    assert info["features"]["action.gripper"]["shape"] == [1]
+    stats = json.loads((out / "meta" / "stats.json").read_text())
+    assert len(stats["action.gripper"]["mean"]) == 1
+
+
 def test_hold_sampling_uses_latest_sample(make_bag, config_file, tmp_path):
     out = tmp_path / "ds"
     reports = convert([make_bag()], load_config(config_file), out)
