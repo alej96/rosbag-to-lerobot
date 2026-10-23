@@ -87,6 +87,10 @@ def write_dataset(
     image_keys = list(first.sync.images)
     value_widths = {k: first.sync.values[k].shape[1] for k in keys}
     image_shapes = {k: first.sync.images[k][0].shape for k in image_keys}
+    # LeRobot's hf_features reads a width-1 feature as a scalar datasets.Value, not a
+    # length-1 datasets.Sequence; write those columns as plain floats, not 1-element
+    # arrays, so the parquet dtype matches what info.json's shape [1] tells it to expect.
+    scalar_keys = {k for k in keys if value_widths[k] == 1}
 
     out = Path(out)
     existing = _load_existing(out) if append else None
@@ -126,7 +130,10 @@ def write_dataset(
             return
         chunk = pd.concat(chunk_frames, ignore_index=True)
         for k in keys:
-            chunk[k] = chunk[k].map(lambda v: np.asarray(v, dtype=np.float32))
+            if k in scalar_keys:
+                chunk[k] = chunk[k].astype(np.float32)
+            else:
+                chunk[k] = chunk[k].map(lambda v: np.asarray(v, dtype=np.float32))
         chunk.to_parquet(out / DATA_PATH.format(chunk_index=0, file_index=file_index), index=False)
         file_index += 1
         chunk_frames = []
@@ -157,7 +164,14 @@ def write_dataset(
 
             ep_idx = episode_offset + i
             n = ep.sync.frames
-            frame = {k: list(ep.sync.values[k]) for k in keys}
+            frame = {
+                k: (
+                    ep.sync.values[k][:, 0].astype(np.float32)
+                    if k in scalar_keys
+                    else list(ep.sync.values[k])
+                )
+                for k in keys
+            }
             frame.update(
                 timestamp=(np.arange(n) / fps).astype(np.float32),
                 frame_index=np.arange(n, dtype=np.int64),
@@ -191,7 +205,7 @@ def write_dataset(
                 row[f"videos/{key}/to_timestamp"] = to_t
                 video_t[key] = to_t
                 _encode_frames(video_containers[key], video_streams[key], ep.sync.images[key])
-            ep_stats = _stats(df, keys)
+            ep_stats = _stats(df, keys, scalar_keys)
             for col, stats in ep_stats.items():
                 for stat, value in stats.items():
                     row[f"stats/{col}/{stat}"] = value
@@ -410,10 +424,13 @@ def _encode_frames(container, stream, frames: list[np.ndarray]) -> None:
             container.mux(packet)
 
 
-def _stats(df: pd.DataFrame, keys: list[str]) -> dict:
+def _stats(df: pd.DataFrame, keys: list[str], scalar_keys: set[str] = frozenset()) -> dict:
     out = {}
     for col in [*keys, *INDEX_FEATURES]:
-        arr = np.stack(df[col].to_numpy()) if col in keys else df[col].to_numpy()[:, None]
+        # a scalar (width-1) feature column holds plain floats, like an index column,
+        # not one row-vector per row, so it needs the same [:, None] reshape as those
+        stack = col in keys and col not in scalar_keys
+        arr = np.stack(df[col].to_numpy()) if stack else df[col].to_numpy()[:, None]
         arr = arr.astype(np.float64)
         out[col] = {
             "min": arr.min(axis=0).tolist(),
