@@ -201,6 +201,7 @@ bag2lerobot init my_run.mcap_dir/ --msg-dir custom_msgs/ -o cfg.yaml   # carries
 uv venv && uv pip install -e ".[dev]"
 ruff check . && ruff format --check . && python -m pytest -q
 pip install "lerobot[dataset]" && python -m pytest -m lerobot   # loader compatibility
+python -m pytest -m network   # converts a real public bag; see docs/validated-bags.md
 ```
 
 ## License

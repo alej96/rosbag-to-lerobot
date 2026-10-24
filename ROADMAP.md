@@ -59,9 +59,13 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
-- [ ] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
+- [x] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
       plus a camera), add a `network` test tier, and record results in
-      `docs/validated-bags.md`.
+      `docs/validated-bags.md`. Follow-up: `TopicInfo.rate_hz` can report an absurd rate
+      (seen as `95000000000.0Hz` on a real bag's `/tf` topic) when a topic's first and
+      last message timestamps are only a few nanoseconds apart; harmless today since no
+      config feature ever maps to such a topic, but worth a sane clamp/display fix with
+      a test bag that reproduces the clustered timestamps.
 - [x] **Custom message types** from `.msg` files (`msg_dir`/`--msg-dir`) for bags whose
       types aren't bundled with `rosbags` and aren't embedded in the bag either (some ROS
       2 storage plugins/distros only record the type name). `inspect`, `init` and
@@ -159,3 +163,18 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   had a width-1 feature, so this was invisible until now; it would have broken any
   single-value feature, not just the ones `init` generates. Still top of "Next up":
   "Stream extraction of a single huge bag", for the same reason as yesterday.
+- 2026-10-24: Real-bag validation: `tests/test_real_bags.py` (opt-in `network` marker,
+  skipped on a plain `pytest` run via a `pytest_collection_modifyitems` hook, not just
+  `importorskip` like the `lerobot` marker, since this one makes a live HTTP call)
+  downloads a real ROS 2 Jazzy MCAP recording (dual-arm mobile manipulator teleop, 18
+  topics, `RobotisSW/rosbag_test4` on the Hugging Face Hub) and converts its 25-joint
+  `JointState` plus a `CompressedImage` camera into a LeRobot episode, asserting it
+  converts with ~0 stale frames and loads in the real `LeRobotDataset`. `inspect_bag`
+  needed no `msg_dir` for any of this bag's (all-standard) message types. Picked over
+  "Stream extraction of a single huge bag" again (now deferred three sessions running
+  for the same reason: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because
+  this one was concretely actionable and the project had never been run against a real
+  bag before. Results and the one quirk found (`/tf`'s displayed rate) are in
+  `docs/validated-bags.md`.
