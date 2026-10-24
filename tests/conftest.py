@@ -200,6 +200,22 @@ features:
 """
 
 
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Keep ``network`` tests out of a plain ``pytest`` run.
+
+    Unlike ``lerobot`` tests (which self-skip cheaply via ``importorskip`` when the
+    package isn't installed), a ``network`` test makes a live HTTP call; it should only
+    run when explicitly asked for with ``-m network`` (or an expression containing it),
+    not on every default run of the suite.
+    """
+    if "network" in (config.getoption("markexpr") or ""):
+        return
+    skip_network = pytest.mark.skip(reason="network test; run explicitly with `-m network`")
+    for item in items:
+        if "network" in item.keywords:
+            item.add_marker(skip_network)
+
+
 @pytest.fixture
 def config_file(tmp_path) -> Path:
     path = tmp_path / "config.yaml"

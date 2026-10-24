@@ -50,4 +50,7 @@ select = ["E", "F", "I", "B", "UP", "NPY", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["lerobot: needs the lerobot package installed (skipped otherwise)"]
+markers = [
+  "lerobot: needs the lerobot package installed (skipped otherwise)",
+  "network: downloads a real public bag from the internet (opt-in, run with -m network)",
+]
