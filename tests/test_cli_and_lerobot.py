@@ -9,7 +9,7 @@ def test_inspect(make_bag, capsys):
     out = capsys.readouterr().out
     assert "/follower/joint_states" in out
     assert "sensor_msgs/msg/JointState" in out
-    assert "100.0Hz" in out or "99." in out
+    assert "100." in out or "99." in out
 
 
 def test_convert_cli_and_strict(make_bag, config_file, tmp_path, capsys):

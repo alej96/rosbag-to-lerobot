@@ -56,11 +56,7 @@ class TopicInfo:
     topic: str
     msgtype: str
     count: int
-    duration_s: float
-
-    @property
-    def rate_hz(self) -> float:
-        return (self.count - 1) / self.duration_s if self.duration_s > 0 and self.count > 1 else 0.0
+    rate_hz: float
 
 
 class ExtractError(ValueError):
@@ -112,19 +108,34 @@ def _deserialize(reader: AnyReader, raw: bytes, conn, path: str | Path):
         ) from exc
 
 
+def _rate_hz(times_ns: list[int]) -> float:
+    """Typical publish rate from the median gap between consecutive messages.
+
+    The first/last timestamp span divided by the count looks right for a steadily
+    published topic, but breaks down for one that publishes in bursts (e.g. a static
+    `/tf` republished as a cluster of messages that (nearly) share a single bag
+    timestamp): a tiny span with a large count then divides out to an absurd rate. The
+    median gap instead reflects the typical interval and collapses to ``0.0`` (the
+    existing "no reliable rate" sentinel) when most messages are part of a burst.
+    """
+    if len(times_ns) < 2:
+        return 0.0
+    gaps = np.diff(np.sort(np.asarray(times_ns, dtype=np.int64)))
+    median_gap_ns = np.median(gaps)
+    return float(1e9 / median_gap_ns) if median_gap_ns > 0 else 0.0
+
+
 def inspect_bag(path: str | Path, msg_dir: str | Path | None = None) -> list[TopicInfo]:
     counts: Counter[str] = Counter()
-    first: dict[str, int] = {}
-    last: dict[str, int] = {}
+    times: dict[str, list[int]] = {}
     types: dict[str, str] = {}
     with _reader(Path(path), msg_dir) as reader:
         for conn, t, _ in reader.messages():
             counts[conn.topic] += 1
-            first.setdefault(conn.topic, t)
-            last[conn.topic] = t
+            times.setdefault(conn.topic, []).append(t)
             types[conn.topic] = conn.msgtype
     return [
-        TopicInfo(topic, types[topic], counts[topic], (last[topic] - first[topic]) / 1e9)
+        TopicInfo(topic, types[topic], counts[topic], _rate_hz(times[topic]))
         for topic in sorted(counts)
     ]
 

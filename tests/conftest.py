@@ -40,6 +40,8 @@ class BagSpec:
     episode_starts: list[float] = field(default_factory=list)  # /episode_start times (s)
     episode_start_type: str = "bool"  # "bool" (std_msgs/Bool, data=True) or "empty"
     idle_gap: tuple[float, float] | None = None  # (start, end) seconds with no messages at all
+    burst_topic: str | None = None  # topic to publish `burst_count` std_msgs/Empty msgs on
+    burst_count: int = 0  # ...almost all at the same bag timestamp, like a static /tf replay
 
 
 def _times(hz: float, start: float, end: float, jitter: float, rng) -> np.ndarray:
@@ -159,6 +161,15 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
         for t in spec.episode_starts:
             msg = T[msgtype](data=True) if is_bool else T[msgtype]()
             msgs.append((t, "/episode_start", msgtype, msg))
+    if spec.burst_topic and spec.burst_count > 1:
+        empty = T["std_msgs/msg/Empty"]()
+        # all but one message land on the exact same bag timestamp, then one more a
+        # microsecond later (float64 precision near T0 can't resolve less than that):
+        # reproduces a real /tf static-transform replay, where
+        # (count - 1) / (last - first) blows up to an absurd rate.
+        for _ in range(spec.burst_count - 1):
+            msgs.append((0.0, spec.burst_topic, "std_msgs/msg/Empty", empty))
+        msgs.append((1e-6, spec.burst_topic, "std_msgs/msg/Empty", empty))
     if spec.idle_gap:
         gap_start, gap_end = spec.idle_gap
         msgs = [m for m in msgs if not (gap_start <= m[0] < gap_end)]
