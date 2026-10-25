@@ -30,11 +30,10 @@ output loads in the real `lerobot.datasets.lerobot_dataset.LeRobotDataset` with 
 expected `(25,)` `observation.state` shape.
 
 One unrelated quirk found along the way: `bag2lerobot inspect` printed `/tf`'s rate as
-`95000000000.0Hz`. `/tf` isn't a topic any config would ever map to a feature, so it
-doesn't affect conversion, but `TopicInfo.rate_hz` doesn't clamp out the degenerate case
-where two messages share (or nearly share) a bag timestamp -- tracked as a follow-up
-below rather than fixed blind in this change, since it needs its own test bag that
-reproduces the clustered timestamps rather than a guess at the cause.
+`95000000000.0Hz`, since `/tf` was republished as a burst where nearly every message
+shared one bag timestamp and the old `rate_hz` divided the message count by that
+near-zero first/last span. Fixed in a later session: `rate_hz` now uses the median gap
+between consecutive messages instead (see the Log in `ROADMAP.md`, 2026-10-25).
 
 ## Running it
 
