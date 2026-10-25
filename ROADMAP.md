@@ -61,11 +61,7 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       re-uploading everything, make it skip files `--append` didn't touch.
 - [x] **Real-bag validation.** Find small public ROS bags (robot arms with JointState
       plus a camera), add a `network` test tier, and record results in
-      `docs/validated-bags.md`. Follow-up: `TopicInfo.rate_hz` can report an absurd rate
-      (seen as `95000000000.0Hz` on a real bag's `/tf` topic) when a topic's first and
-      last message timestamps are only a few nanoseconds apart; harmless today since no
-      config feature ever maps to such a topic, but worth a sane clamp/display fix with
-      a test bag that reproduces the clustered timestamps.
+      `docs/validated-bags.md`.
 - [x] **Custom message types** from `.msg` files (`msg_dir`/`--msg-dir`) for bags whose
       types aren't bundled with `rosbags` and aren't embedded in the bag either (some ROS
       2 storage plugins/distros only record the type name). `inspect`, `init` and
@@ -79,6 +75,14 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       sample), for demos already labeled by an external tool; a row's `task` overrides
       the config's `task` for that episode. Reuses the `--dry-run` machinery added for
       the other two splitting sources.
+- [x] **Sane `TopicInfo.rate_hz`.** It divided message count by the first/last timestamp
+      span, which blows up to an absurd rate for a topic republished as a burst (nearly
+      all messages sharing one bag timestamp, like a real `/tf` static-transform replay
+      seen during real-bag validation). `rate_hz` is now the median gap between
+      consecutive messages, which stays accurate for a steadily published topic and
+      collapses to the existing "no reliable rate" `0.0` for a burst. This feeds
+      `bag2lerobot init`'s fps guess, so a bursty topic could previously have produced a
+      nonsensical `fps:` in the generated config, not just a confusing `inspect` display.
 
 ## Needs the owner
 
@@ -178,3 +182,18 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   this one was concretely actionable and the project had never been run against a real
   bag before. Results and the one quirk found (`/tf`'s displayed rate) are in
   `docs/validated-bags.md`.
+- 2026-10-25: Fixed `TopicInfo.rate_hz` (`inspect_bag`): it divided message count by the
+  first/last timestamp span, which reports an absurd rate (`95000000000.0Hz`, seen on a
+  real bag's `/tf` topic) for a topic republished as a burst where nearly every message
+  shares one bag timestamp. It now uses the median gap between consecutive messages,
+  which stays accurate for a steadily published topic and collapses to the existing "no
+  reliable rate" `0.0` for a burst; `tests/test_extract.py` reproduces the burst with a
+  new `BagSpec.burst_topic`/`burst_count` and checks both cases. `bag2lerobot init` reads
+  `rate_hz` to guess `fps`, so this wasn't just a cosmetic `inspect` display bug -- a
+  bursty topic picked as a joint/state candidate could have produced a nonsensical `fps:`
+  in the generated config. Picked over "Stream extraction of a single huge bag" again
+  (now deferred four sessions running, for the same reason as before: it needs `sync.py`
+  to resample incrementally while a window's bounds are still being discovered, which
+  risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch
+  that auto-merges with no review) because this one was a concrete, fully-scoped bug with
+  a known real-world repro, left as a follow-up from yesterday's real-bag validation.
