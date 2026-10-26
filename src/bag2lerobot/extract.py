@@ -108,21 +108,27 @@ def _deserialize(reader: AnyReader, raw: bytes, conn, path: str | Path):
         ) from exc
 
 
-def _rate_hz(times_ns: list[int]) -> float:
-    """Typical publish rate from the median gap between consecutive messages.
+def rate_hz(times_s) -> float:
+    """Typical publish rate (Hz) from the median gap between consecutive timestamps (s).
 
     The first/last timestamp span divided by the count looks right for a steadily
-    published topic, but breaks down for one that publishes in bursts (e.g. a static
-    `/tf` republished as a cluster of messages that (nearly) share a single bag
-    timestamp): a tiny span with a large count then divides out to an absurd rate. The
-    median gap instead reflects the typical interval and collapses to ``0.0`` (the
-    existing "no reliable rate" sentinel) when most messages are part of a burst.
+    published stream, but breaks down for one that publishes in bursts (e.g. a static
+    `/tf` republished as a cluster of messages that (nearly) share a single timestamp):
+    a tiny span with a large count then divides out to an absurd rate. The median gap
+    instead reflects the typical interval and collapses to ``0.0`` (the "no reliable
+    rate" sentinel) when most samples are part of a burst. Used for both ``inspect``'s
+    per-topic rate and the per-stream rate in a conversion's sync report, so a bursty
+    stream can't blow up one and not the other.
     """
-    if len(times_ns) < 2:
+    t = np.sort(np.asarray(times_s, dtype=np.float64))
+    if t.size < 2:
         return 0.0
-    gaps = np.diff(np.sort(np.asarray(times_ns, dtype=np.int64)))
-    median_gap_ns = np.median(gaps)
-    return float(1e9 / median_gap_ns) if median_gap_ns > 0 else 0.0
+    median_gap = np.median(np.diff(t))
+    return float(1.0 / median_gap) if median_gap > 0 else 0.0
+
+
+def _rate_hz(times_ns: list[int]) -> float:
+    return rate_hz(np.asarray(times_ns, dtype=np.float64) / 1e9)
 
 
 def inspect_bag(path: str | Path, msg_dir: str | Path | None = None) -> list[TopicInfo]:

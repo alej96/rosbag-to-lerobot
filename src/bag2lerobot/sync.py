@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from bag2lerobot.config import Config
-from bag2lerobot.extract import ImageStream, Stream, decode_image
+from bag2lerobot.extract import ImageStream, Stream, decode_image, rate_hz
 
 
 @dataclass
@@ -107,9 +107,7 @@ def synchronize(
                 key=key,
                 topic=s.topic,
                 messages=len(s.times),
-                rate_hz=(len(s.times) - 1) / (s.times[-1] - s.times[0])
-                if s.times[-1] > s.times[0]
-                else 0.0,
+                rate_hz=rate_hz(s.times),
                 max_gap_s=float(gaps.max()) if len(gaps) else 0.0,
                 stale_frames=stale,
                 max_staleness_s=staleness,
@@ -135,9 +133,7 @@ def synchronize(
                 key=key,
                 topic=s.topic,
                 messages=len(s.times),
-                rate_hz=(len(s.times) - 1) / (s.times[-1] - s.times[0])
-                if s.times[-1] > s.times[0]
-                else 0.0,
+                rate_hz=rate_hz(s.times),
                 max_gap_s=float(gaps.max()) if len(gaps) else 0.0,
                 stale_frames=stale,
                 max_staleness_s=staleness,

@@ -112,6 +112,21 @@ def test_gap_in_a_stream_is_reported(make_bag, config_file, tmp_path):
     assert all(s.stale_frames == 0 for s in others)
 
 
+def test_stream_report_rate_is_sane_for_burst_topic(make_bag, tmp_path):
+    """StreamReport.rate_hz (shown after every real `convert`) must not blow up for a
+    feature republished as a burst, the same way inspect_bag's rate_hz was fixed: it
+    used to divide message count by the tiny first/last span, which is exactly the bug
+    yesterday's fix addressed in inspect_bag but missed here, since sync.py computed its
+    own rate_hz with the same old formula instead of reusing the fix."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text("fps: 30\nfeatures:\n  action.burst:\n    topic: /burst\n    field: data\n")
+    bag = make_bag(spec=BagSpec(burst_topic="/burst", burst_count=50, burst_numeric=True))
+    reports = convert([bag], load_config(cfg_path), tmp_path / "ds")
+    burst = next(s for s in reports[0].sync.streams if s.key == "action.burst")
+    assert burst.messages == 50
+    assert burst.rate_hz < 1000.0
+
+
 def test_joint_order_is_stable_when_publisher_reorders(make_bag, config_file, tmp_path):
     bag = make_bag(spec=BagSpec(shuffle_joints_every=3))
     out = tmp_path / "ds"
