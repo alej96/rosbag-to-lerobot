@@ -50,6 +50,13 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       longer pin each episode's bulk value/image arrays in memory afterwards. A
       conversion of many bags now peaks at the memory of its largest single bag, not the
       sum of all of them. Second slice of the "stream extraction" item below.
+- [x] **Sane per-stream `rate_hz` in the conversion report.** Yesterday's `TopicInfo.rate_hz`
+      fix (median gap instead of count/span) only landed in `inspect_bag`; `sync.py`'s
+      `StreamReport.rate_hz` — shown after every real `convert` and for every configured
+      feature, not just `inspect` — still divided message count by the first/last span,
+      so a feature topic republished as a burst (the same real `/tf`-style pattern found
+      during real-bag validation) could still report an absurd rate in the actual
+      conversion output. Both now share one `extract.rate_hz` implementation.
 - [ ] **Stream extraction of a single huge bag.** `extract_streams`/`extract_image_streams`
       still hold every sample of one bag in memory before sync runs. For a bag that is
       itself huge (hours of data, or dense video, in one file), that still blows up
@@ -197,3 +204,19 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch
   that auto-merges with no review) because this one was a concrete, fully-scoped bug with
   a known real-world repro, left as a follow-up from yesterday's real-bag validation.
+- 2026-10-26: Fixed `sync.StreamReport.rate_hz`: yesterday's median-gap fix for a bursty
+  topic's rate only landed in `extract.inspect_bag`'s `TopicInfo.rate_hz`; `sync.py` kept
+  its own copy of the old count/span formula for the per-stream rate shown after every
+  real `convert`, so a *configured feature* topic republished as a burst (not just an
+  `inspect`-only display topic like `/tf`) could still report an absurd rate in actual
+  conversion output. Factored the median-gap calculation into one shared
+  `extract.rate_hz`, used by both `inspect_bag` and `sync.synchronize`, and added
+  `BagSpec.burst_numeric` so the burst-topic test helper can produce a numeric feature
+  stream (not just an `inspect`-only topic) to catch this -
+  `tests/test_convert.py::test_stream_report_rate_is_sane_for_burst_topic` fails on the
+  old code with a 51M Hz reading and passes now. Picked over "Stream extraction of a
+  single huge bag" again (now deferred five sessions running, for the same reason as
+  before: it needs `sync.py` to resample incrementally while a window's bounds are still
+  being discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
+  invariants on a branch that auto-merges with no review) because this was a concrete gap
+  left by yesterday's fix, found while re-reading `sync.py` for that invariant risk.
