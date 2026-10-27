@@ -220,3 +220,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   being discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
   invariants on a branch that auto-merges with no review) because this was a concrete gap
   left by yesterday's fix, found while re-reading `sync.py` for that invariant risk.
+- 2026-10-27: Fixed `extract._flatten`: a feature combining several equal-length arrays
+  from one message via `fields` (e.g. `fields: [position, velocity]` on a `JointState`,
+  both indexed by the same `names_from: name`) silently stopped reordering to the
+  canonical joint order. The code reordered the *concatenated* vector against the raw
+  `names_from` array, which is only sized for one field, so the length check inside
+  `_canonical_order` always failed and the reorder never ran -- not just skipped
+  reordering, but also left the feature's `names` list shorter than its vector (3 names
+  for a width-6 feature), which is exactly the kind of shape/names mismatch LeRobot's
+  loader rejects. Fixed by reordering each field's block to the canonical order on its
+  own, before concatenating. `tests/test_convert.py::
+  test_joint_order_is_stable_with_multiple_fields_from_one_names_from` reproduces it with
+  a `position`+`velocity` feature over a driver that reshuffles joints every few
+  messages: fails on the old code (names list only 3 long, columns drift out of order)
+  and passes now. `tests/conftest.py`'s synthetic `JointState` now publishes real
+  `velocity` values (previously always empty) so a test can combine it with `position`.
+  Picked over "Stream extraction of a single huge bag" again (now deferred six sessions
+  running, for the same reason as before: it needs `sync.py` to resample incrementally
+  while a window's bounds are still being discovered, which risks the "never drop a
+  frame"/"timestamp == frame_index / fps" invariants on a branch that auto-merges with no
+  review) because this was a concrete, silent correctness bug found while reading
+  `extract.py` for that same risk, and it fit a realistic config (state = position +
+  velocity, both joint-ordered) that no existing test exercised.
