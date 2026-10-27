@@ -22,6 +22,14 @@ def signal(t: np.ndarray | float) -> np.ndarray:
     return np.stack([np.sin(t), np.cos(t), 0.1 * t], axis=-1)
 
 
+def velocity_signal(t: np.ndarray | float) -> np.ndarray:
+    """Joint velocities as a function of time (s since start): distinct from ``signal``
+    (and offset well clear of its range) so a test combining both in one feature can
+    tell the two blocks apart."""
+    t = np.asarray(t, dtype=np.float64)
+    return np.stack([10.0 + np.cos(t), 10.0 - np.sin(t), 10.0 + 0.1 * t], axis=-1)
+
+
 @dataclass
 class BagSpec:
     seconds: float = 3.0
@@ -66,15 +74,16 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
 
     def joint_state(t: float, reverse: bool = False, offset: float = 0.0):
         pos = signal(t) + offset
+        vel = velocity_signal(t)
         names = list(JOINTS)
         if reverse:
-            names, pos = names[::-1], pos[::-1]
+            names, pos, vel = names[::-1], pos[::-1], vel[::-1]
         empty = np.array([], dtype=np.float64)
         return T["sensor_msgs/msg/JointState"](
             header=header(t),
             name=names,
             position=np.ascontiguousarray(pos, dtype=np.float64),
-            velocity=empty,
+            velocity=np.ascontiguousarray(vel, dtype=np.float64),
             effort=empty,
         )
 

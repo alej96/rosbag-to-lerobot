@@ -380,24 +380,28 @@ def _get(obj, path: str):
 def _flatten(
     msg, spec: FeatureSpec, joint_order: dict[str, list[str]]
 ) -> tuple[np.ndarray, list[str]]:
+    # names_from's per-element names describe one array (e.g. JointState.name), not the
+    # whole feature vector, so a 'fields' list combining several same-length arrays off
+    # that message (e.g. [position, velocity], both indexed by 'name') must reorder each
+    # one to the canonical order on its own, block by block, rather than reordering the
+    # concatenated vector against one names list sized for a single field.
+    raw_names = [str(n) for n in _get(msg, spec.names_from)] if spec.names_from else None
     parts: list[np.ndarray] = []
     names: list[str] = []
     for path in spec.fields or [""]:
         value = _get(msg, path) if path else msg
         vec, leaf_names = _numeric(value, path or spec.topic.strip("/"))
+        if raw_names is not None and spec.names is None and len(vec) == len(raw_names):
+            # reorder-safe: some drivers publish joints in varying order
+            vec, leaf_names = _canonical_order(vec, raw_names, spec, joint_order)
         parts.append(vec)
         names.extend(leaf_names)
     vec = np.concatenate(parts) if parts else np.zeros(0)
 
     if spec.names:
         names = list(spec.names)
-    elif spec.names_from:
-        names = [str(n) for n in _get(msg, spec.names_from)]
-    if spec.names and len(spec.names) != len(vec):
-        raise ExtractError(f"'{spec.key}': {len(spec.names)} names for {len(vec)} values")
-    if spec.names_from and spec.names is None:
-        # reorder-safe: some drivers publish joints in varying order
-        vec, names = _canonical_order(vec, names, spec, joint_order)
+        if len(spec.names) != len(vec):
+            raise ExtractError(f"'{spec.key}': {len(spec.names)} names for {len(vec)} values")
     return vec, names
 
 
