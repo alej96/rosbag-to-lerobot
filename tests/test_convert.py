@@ -9,7 +9,7 @@ from bag2lerobot.convert import convert
 from bag2lerobot.extract import ExtractError, extract_image_streams, extract_streams
 from bag2lerobot.sync import synchronize
 from bag2lerobot.writer import Episode, write_dataset
-from tests.conftest import JOINTS, BagSpec, signal
+from tests.conftest import JOINTS, BagSpec, signal, velocity_signal
 
 
 def _read(out):
@@ -135,6 +135,34 @@ def test_joint_order_is_stable_when_publisher_reorders(make_bag, config_file, tm
     state = np.stack(data["observation.state"])
     t = reports[0].sync.t0 - 1_700_000_000.0 + data["timestamp"].to_numpy()
     assert np.abs(state - signal(t)).max() < 0.02
+
+
+def test_joint_order_is_stable_with_multiple_fields_from_one_names_from(make_bag, tmp_path):
+    """names_from's names describe one array (JointState.name); a feature combining
+    several equally-long arrays off the same message ('fields: [position, velocity]')
+    must reorder each one to the canonical order on its own, not treat the concatenated
+    vector as one block sized for a single field. Otherwise a driver that reorders
+    joints produces a feature whose columns silently drift out of the canonical order,
+    and whose 'names' no longer even matches the feature's width."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "fps: 30\n"
+        "features:\n"
+        "  observation.state:\n"
+        "    topic: /follower/joint_states\n"
+        "    fields: [position, velocity]\n"
+        "    names_from: name\n"
+    )
+    bag = make_bag(spec=BagSpec(shuffle_joints_every=3))
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(cfg_path), out)
+    info, data, _ = _read(out)
+
+    assert info["features"]["observation.state"]["names"] == JOINTS + JOINTS
+    state = np.stack(data["observation.state"])
+    t = reports[0].sync.t0 - 1_700_000_000.0 + data["timestamp"].to_numpy()
+    assert np.abs(state[:, :3] - signal(t)).max() < 0.02
+    assert np.abs(state[:, 3:] - velocity_signal(t)).max() < 0.02
 
 
 def test_multiple_bags_become_episodes(make_bag, config_file, tmp_path):
