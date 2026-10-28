@@ -107,6 +107,18 @@ def test_mismatched_image_resolution_across_episodes_rejected(make_bag, tmp_path
         convert(bags, load_config(cfg_path), tmp_path / "ds")
 
 
+def test_odd_resolution_rejected_with_a_clear_error(make_bag, tmp_path):
+    """H.264's yuv420p needs even width and height (chroma is subsampled 2x2); a camera
+    with an odd dimension (e.g. a cropped ROI) used to reach PyAV/ffmpeg before failing,
+    which raised an opaque 'avcodec_open2(...) Generic error in an external library'
+    instead of telling the user what's actually wrong or what to do about it."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(IMAGE_CONFIG)
+    bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=10, camera_size=(7, 6)))
+    with pytest.raises(ValueError, match="odd dimension"):
+        convert([bag], load_config(cfg_path), tmp_path / "ds")
+
+
 def test_decodes_raw_and_compressed_images(make_bag):
     bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=5, compressed_camera_hz=5))
     cfg = parse_config(

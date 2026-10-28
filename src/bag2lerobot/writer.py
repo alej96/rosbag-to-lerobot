@@ -399,6 +399,14 @@ def _open_video_streams(
         raise ValueError(
             "writing image features needs the 'video' extra: pip install 'bag2lerobot[video]'"
         ) from exc
+    for key in image_keys:
+        h, w, _ = image_shapes[key]
+        if h % 2 or w % 2:
+            raise ValueError(
+                f"image feature '{key}': resolution {w}x{h} has an odd dimension, but "
+                f"{VIDEO_CODEC} ({VIDEO_PIX_FMT}) needs both width and height even; crop or "
+                "pad the source images to an even size before converting"
+            )
     containers, streams = {}, {}
     for key in image_keys:
         path = out / VIDEO_PATH.format(
