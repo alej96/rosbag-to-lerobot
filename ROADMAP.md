@@ -91,6 +91,13 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       `bag2lerobot init`'s fps guess, so a bursty topic could previously have produced a
       nonsensical `fps:` in the generated config, not just a confusing `inspect` display.
 
+- [x] **Reject an odd video resolution with a clear error.** A camera with an odd width
+      or height (e.g. a cropped ROI) reached PyAV/ffmpeg before failing, which raised an
+      opaque `avcodec_open2(...) Generic error in an external library` instead of
+      explaining that H.264's yuv420p needs both dimensions even. `_open_video_streams`
+      now checks every image feature's resolution before opening any container and
+      raises a clear `ValueError` naming the feature and its resolution.
+
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
@@ -242,3 +249,19 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   review) because this was a concrete, silent correctness bug found while reading
   `extract.py` for that same risk, and it fit a realistic config (state = position +
   velocity, both joint-ordered) that no existing test exercised.
+- 2026-10-28: Fixed `writer._open_video_streams`: an image feature with an odd width or
+  height (e.g. a cropped camera ROI) used to reach PyAV/ffmpeg before failing, raising an
+  opaque `av.error.ExternalError: avcodec_open2("libx264", ...) Generic error in an
+  external library` with no indication of the actual cause. H.264's `yuv420p` pixel
+  format subsamples chroma 2x2, so it needs both dimensions even; every image feature's
+  resolution is now checked before any video container is opened, raising a clear
+  `ValueError` naming the feature and its resolution instead.
+  `tests/test_video.py::test_odd_resolution_rejected_with_a_clear_error` reproduces it
+  (fails on the old code with the opaque ffmpeg error, passes now with the clear one).
+  Picked over "Stream extraction of a single huge bag" again (now deferred seven sessions
+  running, for the same reason as before: it needs `sync.py` to resample incrementally
+  while a window's bounds are still being discovered, which risks the "never drop a
+  frame"/"timestamp == frame_index / fps" invariants on a branch that auto-merges with no
+  review) because this was a concrete crash-to-confusing-error bug, found while reading
+  `writer.py`'s video path for realistic camera configurations (a cropped or non-standard
+  resolution) the existing tests never exercised.
