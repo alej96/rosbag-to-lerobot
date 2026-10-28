@@ -20,7 +20,9 @@ one small YAML file.
   features: frames are held on the same frame grid as everything else and encoded to MP4
   (H.264 via [PyAV](https://github.com/PyAV-Org/PyAV)); needs the `video` extra. Only the
   frames the output grid actually samples are decoded, so a camera recorded faster than
-  the configured `fps` doesn't waste memory decoding frames that get thrown away.
+  the configured `fps` doesn't waste memory decoding frames that get thrown away. A
+  camera resolution with an odd width or height (H.264's yuv420p needs both even) is
+  rejected with a clear error before encoding starts, rather than crashing inside ffmpeg.
 - Splits one bag with many demos into multiple episodes: on a topic (`split_on`),
   automatically wherever every stream goes idle (`split_idle_gap_s`), or from a CSV of
   time ranges labeled by an external tool (`split_csv`, optionally with a per-episode
