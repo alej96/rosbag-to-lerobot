@@ -23,6 +23,9 @@ one small YAML file.
   the configured `fps` doesn't waste memory decoding frames that get thrown away. A
   camera resolution with an odd width or height (H.264's yuv420p needs both even) is
   rejected with a clear error before encoding starts, rather than crashing inside ffmpeg.
+  A truncated or corrupt frame (a dropped recording chunk, a driver bug) also raises a
+  clear error naming the problem, instead of a raw `PIL.UnidentifiedImageError` or numpy
+  reshape crash.
 - Splits one bag with many demos into multiple episodes: on a topic (`split_on`),
   automatically wherever every stream goes idle (`split_idle_gap_s`), or from a CSV of
   time ranges labeled by an external tool (`split_csv`, optionally with a per-episode
