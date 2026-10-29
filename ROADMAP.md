@@ -63,6 +63,18 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       memory even though a conversion of many such bags no longer does (shipped above).
       Needs incremental/windowed resampling in `sync.py`, so even one bag can be read and
       synchronized in pieces instead of loading all of it first.
+- [ ] **Chunk video files by size, like the data parquet already is.** `--max-data-file-mb`
+      splits the data parquet but a camera's video is still one unboundedly large MP4 per
+      `convert` call. Checking the file's actual size mid-stream doesn't work the way it
+      does for the data parquet, though: PyAV/libx264 buffers many frames before emitting
+      any encoded packet (lookahead for rate control), and once you force a flush to see
+      the real size so far, the encoder can't accept more frames afterwards -- so the
+      on-disk size reads as ~0 for a long stretch and then jumps, and there's no way to
+      "peek" without ending the stream. Doing this right needs either a duration/frame-count
+      based rotation (simpler, but doesn't actually bound file size, which is the point) or
+      accepting an encoder setting that disables lookahead so packets emit promptly (a real
+      compression-efficiency cost for every conversion, not just large ones) -- not a
+      single-session fix on its own.
 - [x] **Append mode.** Add episodes to an existing dataset (`--append`), checking that
       features and fps match. Follow-up: once Hub re-push can diff instead of
       re-uploading everything, make it skip files `--append` didn't touch.
@@ -265,3 +277,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   review) because this was a concrete crash-to-confusing-error bug, found while reading
   `writer.py`'s video path for realistic camera configurations (a cropped or non-standard
   resolution) the existing tests never exercised.
+- 2026-10-29: Fixed `extract.decode_image`: a truncated or corrupt frame (a dropped
+  recording chunk, a driver bug) used to reach PIL or numpy before failing. For
+  `CompressedImage` this raised a bare `PIL.UnidentifiedImageError`, which (unlike every
+  other error in this codebase) isn't even a `ValueError`, so it wasn't one of the clear
+  "bag2lerobot: ..." errors `cli.main` catches -- it reached the user as a raw, unhandled
+  traceback instead. For raw `Image` with fewer data bytes than `height*step` promises, it
+  raised numpy's "cannot reshape array of size N into shape (...)", which names neither the
+  topic nor what's actually wrong. Both now raise a clear `ExtractError` naming the problem.
+  `tests/test_video.py::test_corrupt_compressed_image_rejected_with_a_clear_error` and
+  `::test_truncated_raw_image_data_rejected_with_a_clear_error` reproduce both (the first
+  fails on the old code with an uncaught `UnidentifiedImageError`, not merely an unclear
+  message) and pass now. Found attempting to add a video-file-size-chunking follow-up to
+  yesterday's work: PyAV/libx264 buffers many frames before emitting any encoded packet
+  (and a mid-stream flush can't be resumed), so a video file's actual on-disk size can't be
+  checked incrementally without either hurting compression (forcing every frame to be a
+  keyframe) or being unreliable for the realistic case that motivates it; abandoned that
+  attempt as unreliable rather than ship it, and fixed this concrete bug instead, found
+  while constructing malformed messages to probe `decode_image`'s error paths. Picked over
+  "Stream extraction of a single huge bag" again (now deferred eight sessions running, for
+  the same reason as before).
