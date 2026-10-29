@@ -338,8 +338,18 @@ def decode_image(msg) -> np.ndarray:
             ) from exc
         import io
 
-        with PILImage.open(io.BytesIO(bytes(msg.data))) as img:
-            return np.array(img.convert("RGB"))
+        fmt = getattr(msg, "format", "?")
+        try:
+            with PILImage.open(io.BytesIO(bytes(msg.data))) as img:
+                return np.array(img.convert("RGB"))
+        except Exception as exc:
+            # a truncated/corrupt frame (e.g. a dropped recording chunk) otherwise
+            # surfaces as a raw PIL.UnidentifiedImageError, which isn't even a
+            # ValueError and so isn't one of the clear "bag2lerobot: ..." errors the
+            # CLI knows to catch -- it reaches the user as an unhandled traceback.
+            raise ExtractError(
+                f"could not decode CompressedImage (format '{fmt}', {len(msg.data)} bytes): {exc}"
+            ) from exc
     if msgtype.endswith("Image"):
         channels, is_bgr = _RAW_ENCODINGS.get(msg.encoding, (None, None))
         if channels is None:
@@ -348,7 +358,16 @@ def decode_image(msg) -> np.ndarray:
                 f"{', '.join(_RAW_ENCODINGS)}, or publish CompressedImage)"
             )
         data = np.asarray(msg.data, dtype=np.uint8)
-        rows = data[: msg.height * msg.step].reshape(msg.height, msg.step)
+        expected = msg.height * msg.step
+        if data.size < expected:
+            # a driver bug or truncated recording can leave fewer data bytes than
+            # height*step promises; np.reshape's "cannot reshape array of size N
+            # into shape (...)" names neither the topic nor what's actually wrong.
+            raise ExtractError(
+                f"Image message has {data.size} data byte(s), expected at least {expected} "
+                f"({msg.height}x{msg.step} for encoding '{msg.encoding}')"
+            )
+        rows = data[:expected].reshape(msg.height, msg.step)
         frame = rows[:, : msg.width * channels].reshape(msg.height, msg.width, channels)
         if channels == 1:
             return np.repeat(frame, 3, axis=2)

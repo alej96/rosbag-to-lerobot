@@ -201,6 +201,42 @@ def test_unsupported_image_encoding_rejected():
         decode_image(FakeImage(data=np.zeros(16, dtype=np.uint8)))
 
 
+def test_truncated_raw_image_data_rejected_with_a_clear_error():
+    """Fewer data bytes than height*step promises (a driver bug or a truncated
+    recording) used to reach numpy's reshape before failing, raising a bare
+    'cannot reshape array of size N into shape (...)' that names neither the topic
+    nor what's actually wrong."""
+
+    @dataclass
+    class FakeImage:
+        __msgtype__ = "sensor_msgs/msg/Image"
+        height: int = 4
+        width: int = 4
+        encoding: str = "rgb8"
+        is_bigendian: int = 0
+        step: int = 12
+        data: np.ndarray = None
+
+    with pytest.raises(ExtractError, match="Image message has 5 data byte"):
+        decode_image(FakeImage(data=np.zeros(5, dtype=np.uint8)))
+
+
+def test_corrupt_compressed_image_rejected_with_a_clear_error():
+    """A truncated/corrupt CompressedImage frame used to raise a bare
+    PIL.UnidentifiedImageError, which (unlike bag2lerobot's own errors) isn't even a
+    ValueError, so it reached the user as an unhandled traceback instead of the
+    usual 'bag2lerobot: ...' message."""
+
+    @dataclass
+    class FakeCompressedImage:
+        __msgtype__ = "sensor_msgs/msg/CompressedImage"
+        format: str = "jpeg"
+        data: np.ndarray = None
+
+    with pytest.raises(ExtractError, match="could not decode CompressedImage"):
+        decode_image(FakeCompressedImage(data=np.array([1, 2, 3, 4, 5], dtype=np.uint8)))
+
+
 @pytest.mark.parametrize(
     ("encoding", "channels", "pixel", "expected_rgb"),
     [
