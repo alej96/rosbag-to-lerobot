@@ -297,3 +297,22 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   while constructing malformed messages to probe `decode_image`'s error paths. Picked over
   "Stream extraction of a single huge bag" again (now deferred eight sessions running, for
   the same reason as before).
+- 2026-10-30: Fixed `config.parse_config`: a malformed YAML config (e.g. `features:`
+  indented as a list instead of a mapping, a blank/scalar file, or the whole file not
+  parsing to a mapping) used to reach dict-only code (`"fps" not in data`, `data.get`,
+  `raw_features.items()`) and crash with a raw `AttributeError`/`TypeError`, instead of
+  the clear `ConfigError`/"bag2lerobot: ..." message every other bad-config path in this
+  file already gives (bad `sync.method`, bad `split_on` type, etc.). `parse_config` now
+  checks that the top-level config and `features:` are both mappings before doing any
+  dict-like access, each with a clear error naming what was found instead.
+  `tests/test_config.py::test_non_mapping_config_raises_a_clear_error` and
+  `::test_non_mapping_features_raises_a_clear_error` reproduce both (fail on the old code
+  with an unhandled `AttributeError`/`TypeError`, pass now with a clear `ConfigError`).
+  Found while re-reading `config.py` for malformed-input handling, the same way last
+  session's `decode_image` fix was found by probing `extract.py`'s error paths; a bad
+  `features:` indentation (a YAML list instead of a mapping) is an easy real typo to
+  make by hand. Picked over "Stream extraction of a single huge bag" again (now deferred
+  nine sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review).
