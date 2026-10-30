@@ -54,9 +54,19 @@ def load_config(path: str | Path) -> Config:
 
 
 def parse_config(data: dict) -> Config:
+    if not isinstance(data, dict):
+        raise ConfigError(
+            "config must be a YAML mapping with top-level keys like 'fps' and 'features', "
+            f"got {type(data).__name__}"
+        )
     if "fps" not in data:
         raise ConfigError("config needs 'fps' (the output frame rate)")
     raw_features = data.get("features") or {}
+    if not isinstance(raw_features, dict):
+        raise ConfigError(
+            "'features' must be a mapping of feature name -> spec, "
+            f"got {type(raw_features).__name__}"
+        )
     if not raw_features:
         raise ConfigError("config needs at least one entry under 'features'")
 
