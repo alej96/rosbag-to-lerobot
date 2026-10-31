@@ -159,6 +159,8 @@ def parse_config(data: dict) -> Config:
         raise ConfigError("'fps' must be positive")
     if cfg.sync not in SYNC_METHODS:
         raise ConfigError(f"sync.method must be one of {SYNC_METHODS}, got '{cfg.sync}'")
+    if cfg.max_staleness_s < 0:
+        raise ConfigError("sync.max_staleness_s must not be negative")
     if cfg.time_source not in TIME_SOURCES:
         raise ConfigError(f"time_source must be one of {TIME_SOURCES}, got '{cfg.time_source}'")
     if cfg.split_idle_gap_s is not None and cfg.split_idle_gap_s <= 0:
