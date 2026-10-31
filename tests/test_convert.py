@@ -297,6 +297,15 @@ def test_negative_feature_max_staleness_rejected(tmp_path):
         load_config(cfg_path)
 
 
+def test_negative_global_max_staleness_rejected(tmp_path):
+    cfg_path = tmp_path / "bad.yaml"
+    cfg_path.write_text(
+        "fps: 30\nsync:\n  max_staleness_s: -1\nfeatures:\n  action:\n    topic: /x\n"
+    )
+    with pytest.raises(ConfigError, match="must not be negative"):
+        load_config(cfg_path)
+
+
 def test_missing_topic_lists_available(make_bag, tmp_path):
     cfg_path = tmp_path / "c.yaml"
     cfg_path.write_text("fps: 30\nfeatures:\n  action:\n    topic: /nope\n")
