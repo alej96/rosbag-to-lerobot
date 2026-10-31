@@ -316,3 +316,18 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   incrementally while a window's bounds are still being discovered, which risks the
   "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
   auto-merges with no review).
+- 2026-10-31: Fixed `config.parse_config`: a negative global `sync.max_staleness_s` was
+  never validated, unlike the identical per-feature `max_staleness_s` override which
+  already rejected negative values with a clear `ConfigError`. A negative global
+  threshold silently reached `sync.synchronize`, where `age > staleness` is then true
+  for every frame (including ones sampled with zero age), so every stream in the
+  conversion report -- and every `--strict` run -- showed every single frame as stale,
+  not just the genuinely stale ones. `tests/test_convert.py::
+  test_negative_global_max_staleness_rejected` reproduces it (fails on the old code with
+  `DID NOT RAISE ConfigError`, passes now). Picked over "Stream extraction of a single
+  huge bag" again (now deferred ten sessions running, for the same reason as before: it
+  needs `sync.py` to resample incrementally while a window's bounds are still being
+  discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
+  invariants on a branch that auto-merges with no review) because this was a concrete,
+  silently-misleading-output bug with an exact parity gap against an already-existing
+  check, found while re-reading `config.py`'s validation coverage.
