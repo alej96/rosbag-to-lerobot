@@ -134,6 +134,29 @@ def test_convert_splits_one_bag_into_multiple_episodes(make_bag, split_config_fi
     assert info["total_frames"] == reports[0].sync.frames + reports[1].sync.frames
 
 
+def test_split_trimmed_times_are_relative_to_each_episodes_own_window(
+    make_bag, split_config_file, tmp_path
+):
+    """trimmed_start_s/trimmed_end_s report how much of *this episode's* window was cut
+    off waiting for every stream to overlap, not how much of the rest of the bag lies
+    outside it. Before the fix, they were measured against the whole bag's earliest/
+    latest timestamps, so segment 0 (spanning only the bag's first ~1.5s) reported
+    trimmed_end_s of ~1.5s -- the entirety of segment 1 -- and segment 1 reported
+    trimmed_start_s of ~1.5s -- the entirety of segment 0 -- even though neither
+    episode's own data was actually trimmed there."""
+    bag = make_bag(spec=BagSpec(seconds=3.0, episode_starts=[0.0, 1.5]))
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(split_config_file), out)
+
+    assert len(reports) == 2
+    # episode 0 spans ~[0.2, 1.5)s (leader starts 0.2s late): trimmed at its own start,
+    # not at its end (which is just where the split window ends, not missing data).
+    assert reports[0].sync.trimmed_start_s == pytest.approx(0.2, abs=0.05)
+    assert reports[0].sync.trimmed_end_s == pytest.approx(0.0, abs=0.05)
+    # episode 1 starts exactly where the split window starts (no missing data there).
+    assert reports[1].sync.trimmed_start_s == pytest.approx(0.0, abs=0.05)
+
+
 def test_preview_splits_does_not_write(make_bag, split_config_file, tmp_path):
     bag = make_bag(spec=BagSpec(seconds=3.0, episode_starts=[0.0, 1.5]))
     cfg = load_config(split_config_file)
