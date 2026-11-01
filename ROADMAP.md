@@ -331,3 +331,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   invariants on a branch that auto-merges with no review) because this was a concrete,
   silently-misleading-output bug with an exact parity gap against an already-existing
   check, found while re-reading `config.py`'s validation coverage.
+- 2026-11-01: Fixed `sync.synchronize`: `SyncResult.trimmed_start_s`/`trimmed_end_s` --
+  shown after every real `convert` to report how much of an episode's data was cut off
+  waiting for every stream to overlap -- were measured against the whole bag's
+  earliest/latest timestamps even for one episode split out of a longer bag (`split_on`,
+  `split_idle_gap_s` or `split_csv`). An episode spanning only the bag's first half
+  therefore reported `trimmed_end_s` of roughly the entire second half (the rest of the
+  bag outside this episode, not missing data), and the next episode reported a matching
+  bogus `trimmed_start_s` -- exactly backwards from what the stat exists to show, in the
+  three ways this project turns one bag into many episodes. `trimmed_start_s`/
+  `trimmed_end_s` are now measured against the episode's own window (or the whole bag
+  when it isn't split) instead of the whole bag unconditionally.
+  `tests/test_split.py::test_split_trimmed_times_are_relative_to_each_episodes_own_window`
+  reproduces it (fails on the old code with `trimmed_end_s` of ~1.5s for an episode
+  trimmed by ~0s, passes now). Picked over "Stream extraction of a single huge bag" again
+  (now deferred eleven sessions running, for the same reason as before: it needs
+  `sync.py` to resample incrementally while a window's bounds are still being discovered,
+  which risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a
+  branch that auto-merges with no review) because this was a concrete, silently-wrong
+  quality metric in a core feature (episode splitting), found while reading `sync.py` for
+  that same invariant risk.
