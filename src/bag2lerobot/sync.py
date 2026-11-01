@@ -28,6 +28,9 @@ class SyncResult:
     values: dict[str, np.ndarray]  # key -> (frames, D) float32
     names: dict[str, list[str]]
     streams: list[StreamReport] = field(default_factory=list)
+    # how much of this episode's own window (the whole bag when it isn't split into
+    # several episodes) was cut off because not every stream had data yet/still -- not
+    # how much of the rest of the bag lies outside this episode.
     trimmed_start_s: float = 0.0
     trimmed_end_s: float = 0.0
     images: dict[str, list] = field(default_factory=dict)  # key -> one frame per output row
@@ -62,6 +65,11 @@ def synchronize(
     starts = [t[0] for t in all_times]
     ends = [t[-1] for t in all_times]
     earliest, latest = min(starts), max(ends)
+    # the reference points "trimmed_start_s"/"trimmed_end_s" are measured against: the
+    # episode's own window when one was given (so trimming reported for one split-out
+    # episode doesn't include the rest of the bag outside it), otherwise the full bag.
+    window_start = window[0] if window is not None else earliest
+    window_end = window[1] if window is not None and window[1] != float("inf") else latest
     t0, t1 = (max(starts), min(ends)) if cfg.trim_to_overlap else (earliest, latest)
     if window is not None:
         t0, t1 = max(t0, window[0]), min(t1, window[1])
@@ -152,7 +160,7 @@ def synchronize(
         values=values,
         names=names,
         streams=reports,
-        trimmed_start_s=t0 - earliest,
-        trimmed_end_s=latest - t1,
+        trimmed_start_s=t0 - window_start,
+        trimmed_end_s=window_end - t1,
         images=images,
     )
