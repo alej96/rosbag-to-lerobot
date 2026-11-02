@@ -351,3 +351,24 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete, silently-wrong
   quality metric in a core feature (episode splitting), found while reading `sync.py` for
   that same invariant risk.
+- 2026-11-02: Fixed `config.parse_config`: `fields`, `names`, `field` and `names_from` had
+  no type validation, so a plausible YAML typo reached list/string-only code with no
+  error, or the wrong one. `names: xyz` (a scalar instead of `names: [xyz]`) used to pass
+  straight through; `extract._flatten`'s `list(spec.names)` then split the string into one
+  name per *character*, and for a feature whose width happened to match the string's
+  length (e.g. a 3-character name on a 3-DoF joint) this silently wrote garbled per-column
+  names into the dataset with no error at all -- not a crash, a silent data-correctness
+  bug. `fields: position` (scalar instead of a list) hit the same per-character splitting
+  in `_flatten`'s field loop. `field: [position]` and `names_from: [name]` (a list where a
+  string is expected) reached `extract._get`'s `path.split(".")` and crashed with a raw
+  `AttributeError` instead of a clear `ConfigError`. All four now validate up front.
+  `tests/test_config.py::test_names_as_a_string_raises_a_clear_error_instead_of_corrupting_silently`
+  and three sibling tests reproduce each case (each fails on the old code -- either
+  silently wrong output or an unhandled crash -- and passes now with a clear
+  `ConfigError`). Picked over "Stream extraction of a single huge bag" again (now
+  deferred twelve sessions running, for the same reason as before: it needs `sync.py` to
+  resample incrementally while a window's bounds are still being discovered, which risks
+  the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete silent-data-corruption risk in
+  config validation, found while re-reading `config.py`'s field-type coverage after
+  yesterday's staleness fix.
