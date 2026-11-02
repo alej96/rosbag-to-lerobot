@@ -81,7 +81,28 @@ def parse_config(data: dict) -> Config:
             )
         if "field" in spec and "fields" in spec:
             raise ConfigError(f"feature '{key}': use either 'field' or 'fields', not both")
-        fields = spec.get("fields")
+        if spec.get("field") is not None and not isinstance(spec["field"], str):
+            raise ConfigError(f"feature '{key}': 'field' must be a string, got {spec['field']!r}")
+        raw_fields = spec.get("fields")
+        if raw_fields is not None and (
+            not isinstance(raw_fields, list) or not all(isinstance(f, str) for f in raw_fields)
+        ):
+            raise ConfigError(
+                f"feature '{key}': 'fields' must be a list of strings, got {raw_fields!r}"
+            )
+        raw_names = spec.get("names")
+        if raw_names is not None and (
+            not isinstance(raw_names, list) or not all(isinstance(n, str) for n in raw_names)
+        ):
+            raise ConfigError(
+                f"feature '{key}': 'names' must be a list of strings, got {raw_names!r}"
+            )
+        raw_names_from = spec.get("names_from")
+        if raw_names_from is not None and not isinstance(raw_names_from, str):
+            raise ConfigError(
+                f"feature '{key}': 'names_from' must be a string, got {raw_names_from!r}"
+            )
+        fields = raw_fields
         if fields is None:
             fields = [spec["field"]] if spec.get("field") else []
         feat_sync = spec.get("sync")

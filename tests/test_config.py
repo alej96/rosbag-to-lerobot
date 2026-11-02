@@ -31,3 +31,48 @@ def test_non_mapping_features_raises_a_clear_error(bad_features):
     raw AttributeError from '.items()' instead of a clear ConfigError."""
     with pytest.raises(ConfigError, match="'features' must be a mapping"):
         parse_config({"fps": 30, "features": bad_features})
+
+
+def test_names_as_a_string_raises_a_clear_error_instead_of_corrupting_silently():
+    """A YAML typo of 'names: xyz' (a scalar) instead of 'names: [xyz]' (a one-element
+    list) used to pass through unvalidated: FeatureSpec.names ended up as the string
+    "xyz", and extract._flatten's `list(spec.names)` then split it into one name per
+    *character* ('x', 'y', 'z'). For a feature whose width happens to match the string's
+    length (e.g. a 3-character name on a 3-DoF joint), this silently wrote garbled
+    per-column names into the dataset with no error at all, instead of the clear
+    'must be a list of strings' every other malformed field already gets."""
+    with pytest.raises(ConfigError, match="'names' must be a list of strings"):
+        parse_config(
+            {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": "xyz"}}}
+        )
+
+
+def test_fields_as_a_string_raises_a_clear_error_instead_of_corrupting_silently():
+    """Like 'names', 'fields: position' (a scalar) instead of 'fields: [position]' used to
+    reach extract._flatten's `for path in spec.fields` and iterate one *character* at a
+    time as a bogus field path, instead of raising a clear config error up front."""
+    with pytest.raises(ConfigError, match="'fields' must be a list of strings"):
+        parse_config({"fps": 30, "features": {"a": {"topic": "/t", "fields": "position"}}})
+
+
+def test_field_as_a_list_raises_a_clear_error():
+    """'field: [position]' (a list) instead of 'field: position' (a string) used to reach
+    extract._get's `path.split(".")` with a list instead of a string and crash with a raw
+    AttributeError."""
+    with pytest.raises(ConfigError, match="'field' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": "/t", "field": ["position"]}}})
+
+
+def test_names_from_as_a_list_raises_a_clear_error():
+    """'names_from: [name]' (a list) instead of 'names_from: name' (a string) used to
+    reach extract._get's `path.split(".")` with a list instead of a string and crash with
+    a raw AttributeError."""
+    with pytest.raises(ConfigError, match="'names_from' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": "/t", "names_from": ["name"]}}})
+
+
+def test_names_as_a_proper_list_is_unaffected():
+    cfg = parse_config(
+        {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": ["x", "y", "z"]}}}
+    )
+    assert cfg.features[0].names == ["x", "y", "z"]
