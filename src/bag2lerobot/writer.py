@@ -348,6 +348,13 @@ def _check_append_schema(
                 f"--append: feature '{k}' has shape {info['features'][k]['shape']} in the "
                 f"existing dataset, but {shape} now"
             )
+        existing_names = info["features"][k].get("names")
+        new_names = episodes[0].sync.names.get(k)
+        if existing_names != new_names:
+            raise ValueError(
+                f"--append: feature '{k}' has names {existing_names} in the existing dataset, "
+                f"but {new_names} now"
+            )
     for k in image_keys:
         h, w, c = episodes[0].sync.images[k][0].shape
         if info["features"][k]["shape"] != [h, w, c]:
