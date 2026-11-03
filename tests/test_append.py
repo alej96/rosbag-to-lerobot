@@ -134,6 +134,29 @@ def test_append_rejects_feature_mismatch(make_bag, config_file, tmp_path):
         convert([make_bag(name="b")], cfg, out, append=True)
 
 
+def test_append_rejects_explicit_names_mismatch(make_bag, tmp_path):
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        """
+fps: 30
+task: pick the cube
+features:
+  observation.state:
+    topic: /follower/joint_states
+    field: position
+    names: [a, b, c]
+"""
+    )
+    out = tmp_path / "ds"
+    convert([make_bag(name="a")], load_config(cfg_path), out)
+
+    cfg_path.write_text(cfg_path.read_text().replace("names: [a, b, c]", "names: [x, y, z]"))
+    # same shape, but the explicit names changed: appending would otherwise silently
+    # overwrite info.json's column labels for data already written under the old names
+    with pytest.raises(ValueError, match="names"):
+        convert([make_bag(name="b")], load_config(cfg_path), out, append=True)
+
+
 def test_append_rejects_overwrite_combo(make_bag, config_file, tmp_path):
     out = tmp_path / "ds"
     convert([make_bag(name="a")], load_config(config_file), out)
