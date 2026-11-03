@@ -146,12 +146,12 @@ converting everything again:
 bag2lerobot convert new_run.bag -c cfg.yaml -o ./my_dataset --append
 ```
 
-The config must still describe the same fps and features (same keys, shapes and, for a
-`names_from` feature, the same joint names) as the dataset already at `-o`; `--append`
-checks this and fails with a clear error otherwise. Episode and frame indices continue
-from the existing dataset, new data/video files are added alongside the old ones, and
-`meta/stats.json` is recomputed over the combined dataset. `--append` and `--overwrite`
-can't be used together.
+The config must still describe the same fps and features (same keys, shapes and column
+names -- whether from `names_from` or an explicit `names:` list) as the dataset already
+at `-o`; `--append` checks this and fails with a clear error otherwise. Episode and
+frame indices continue from the existing dataset, new data/video files are added
+alongside the old ones, and `meta/stats.json` is recomputed over the combined dataset.
+`--append` and `--overwrite` can't be used together.
 
 ### Large conversions
 

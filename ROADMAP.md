@@ -372,3 +372,22 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   auto-merges with no review) because this was a concrete silent-data-corruption risk in
   config validation, found while re-reading `config.py`'s field-type coverage after
   yesterday's staleness fix.
+- 2026-11-03: Fixed `writer._check_append_schema`: `--append` already rejected a shape
+  mismatch for a feature between two `convert` calls, but never checked that the
+  feature's column *names* still matched -- only a `names_from` feature's joint order
+  was protected (via `_seed_joint_order` seeding the shared `joint_order` dict from the
+  existing dataset before extraction). A feature using an explicit `names:` list (no
+  `names_from`) could have that list edited in the config between two `--append` calls
+  with the shape left unchanged, and the second call silently overwrote `info.json`'s
+  `names` for that feature with the new list -- mislabeling the column semantics of
+  every episode already written under the old names, with no error at all.
+  `tests/test_append.py::test_append_rejects_explicit_names_mismatch` reproduces it
+  (fails on the old code with `info.json` silently relabeled from `[a, b, c]` to
+  `[x, y, z]`, passes now with a clear `ValueError`). Picked over "Stream extraction of
+  a single huge bag" again (now deferred thirteen sessions running, for the same reason
+  as before: it needs `sync.py` to resample incrementally while a window's bounds are
+  still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because
+  this was a concrete metadata-correctness gap in an existing, otherwise-thorough
+  `--append` consistency check, found while reading `writer.py` for the one thing
+  `_check_append_schema` compares (shape) versus the one thing it doesn't (names).
