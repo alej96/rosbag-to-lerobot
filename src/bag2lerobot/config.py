@@ -48,6 +48,18 @@ class ConfigError(ValueError):
     pass
 
 
+def _as_float(value, what: str) -> float:
+    """Convert a config value expected to be a number, raising a clear ConfigError
+    instead of a raw TypeError (e.g. a list or mapping from a YAML indentation typo,
+    which ``float()`` rejects with a message naming neither the field nor the config)."""
+    if not isinstance(value, int | float | str):
+        raise ConfigError(f"{what} must be a number, got {value!r}")
+    try:
+        return float(value)
+    except ValueError:
+        raise ConfigError(f"{what} must be a number, got {value!r}") from None
+
+
 def load_config(path: str | Path) -> Config:
     data = yaml.safe_load(Path(path).read_text()) or {}
     return parse_config(data)
@@ -112,7 +124,7 @@ def parse_config(data: dict) -> Config:
             )
         feat_staleness = spec.get("max_staleness_s")
         if feat_staleness is not None:
-            feat_staleness = float(feat_staleness)
+            feat_staleness = _as_float(feat_staleness, f"feature '{key}': max_staleness_s")
             if feat_staleness < 0:
                 raise ConfigError(f"feature '{key}': max_staleness_s must not be negative")
         if feat_type == "image":
@@ -134,12 +146,14 @@ def parse_config(data: dict) -> Config:
         )
 
     sync = data.get("sync", {}) or {}
+    if not isinstance(sync, dict):
+        raise ConfigError(f"'sync' must be a mapping, got {type(sync).__name__}")
     split_on = data.get("split_on")
     if split_on is not None and not isinstance(split_on, str):
         raise ConfigError("'split_on' must be a topic name (string)")
     split_idle_gap_s = data.get("split_idle_gap_s")
     if split_idle_gap_s is not None:
-        split_idle_gap_s = float(split_idle_gap_s)
+        split_idle_gap_s = _as_float(split_idle_gap_s, "'split_idle_gap_s'")
     split_csv = data.get("split_csv")
     if split_csv is not None and not isinstance(split_csv, str):
         raise ConfigError("'split_csv' must be a path to a CSV file (string)")
@@ -163,12 +177,12 @@ def parse_config(data: dict) -> Config:
             f"(got {', '.join(set_splits)})"
         )
     cfg = Config(
-        fps=float(data["fps"]),
+        fps=_as_float(data["fps"], "'fps'"),
         features=features,
         task=str(data.get("task") or ""),
         robot_type=data.get("robot_type"),
         sync=sync.get("method", "hold"),
-        max_staleness_s=float(sync.get("max_staleness_s", 0.25)),
+        max_staleness_s=_as_float(sync.get("max_staleness_s", 0.25), "sync.max_staleness_s"),
         time_source=data.get("time_source", "header"),
         trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
         split_on=split_on or None,
