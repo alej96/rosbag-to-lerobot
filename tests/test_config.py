@@ -76,3 +76,44 @@ def test_names_as_a_proper_list_is_unaffected():
         {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": ["x", "y", "z"]}}}
     )
     assert cfg.features[0].names == ["x", "y", "z"]
+
+
+@pytest.mark.parametrize(
+    ("key", "bad", "match"),
+    [
+        ("fps", [30], "'fps' must be a number"),
+        ("split_idle_gap_s", [1.0], "'split_idle_gap_s' must be a number"),
+    ],
+)
+def test_numeric_field_as_a_list_raises_a_clear_error(key, bad, match):
+    """A numeric config field given as a list or mapping (e.g. 'fps:' indented with a
+    nested '- 30' by mistake) used to reach ``float()`` directly and crash with a raw,
+    unhandled TypeError ('float() argument must be a string or a real number, not
+    'list''); unlike ValueError, cli.main's except clause doesn't catch TypeError, so
+    this reached the user as an uncaught traceback instead of the usual
+    'bag2lerobot: ...' message every other bad-config value already gets."""
+    data = {**BASE, key: bad} if key != "fps" else {**BASE, "fps": bad}
+    with pytest.raises(ConfigError, match=match):
+        parse_config(data)
+
+
+def test_sync_max_staleness_s_as_a_list_raises_a_clear_error():
+    """Same TypeError-instead-of-ConfigError gap as 'fps', for the global
+    'sync.max_staleness_s' override."""
+    with pytest.raises(ConfigError, match="sync.max_staleness_s must be a number"):
+        parse_config({**BASE, "sync": {"max_staleness_s": [0.1]}})
+
+
+def test_feature_max_staleness_s_as_a_list_raises_a_clear_error():
+    """Same TypeError-instead-of-ConfigError gap as 'fps', for a per-feature
+    'max_staleness_s' override."""
+    with pytest.raises(ConfigError, match="max_staleness_s must be a number"):
+        parse_config({"fps": 30, "features": {"a": {"topic": "/t", "max_staleness_s": [0.1]}}})
+
+
+def test_non_mapping_sync_raises_a_clear_error():
+    """'sync:' written as a list instead of a mapping (e.g. '- hold') used to reach
+    ``sync.get(...)`` and crash with a raw AttributeError instead of a clear
+    ConfigError."""
+    with pytest.raises(ConfigError, match="'sync' must be a mapping"):
+        parse_config({**BASE, "sync": ["hold"]})
