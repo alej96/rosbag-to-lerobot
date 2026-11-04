@@ -391,3 +391,24 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   this was a concrete metadata-correctness gap in an existing, otherwise-thorough
   `--append` consistency check, found while reading `writer.py` for the one thing
   `_check_append_schema` compares (shape) versus the one thing it doesn't (names).
+- 2026-11-04: Fixed `config.parse_config`: four numeric config values (`fps`, the
+  global `sync.max_staleness_s`, a per-feature `max_staleness_s`, `split_idle_gap_s`)
+  went straight into `float()` with no type check, so a YAML value that wasn't a bare
+  number (e.g. `fps: [30]` from a stray list-item dash, or any mapping) raised a raw,
+  unhandled `TypeError` -- not a `ValueError`, so unlike every other bad-config path in
+  this file, it wasn't one of the exceptions `cli.main` catches and reached the user as
+  an uncaught traceback instead of the usual `bag2lerobot: ...` message. The same gap
+  existed one level up: `sync:` itself (not a value under it, the block as a whole)
+  written as a list instead of a mapping crashed `sync.get(...)` with a raw
+  `AttributeError` for the same reason. Added a shared `_as_float` helper used by all
+  four numeric fields, and a type check on `sync` itself, each raising a clear
+  `ConfigError` instead. `tests/test_config.py::test_numeric_field_as_a_list_raises_a_clear_error`
+  and three sibling tests reproduce all five cases (each fails on the old code with an
+  unhandled `TypeError`/`AttributeError`, passes now with a clear `ConfigError`). Picked
+  over "Stream extraction of a single huge bag" again (now deferred fourteen sessions
+  running, for the same reason as before: it needs `sync.py` to resample incrementally
+  while a window's bounds are still being discovered, which risks the "never drop a
+  frame"/"timestamp == frame_index / fps" invariants on a branch that auto-merges with
+  no review) because this was a concrete crash-to-clear-error gap, in the same family as
+  several previous sessions' config-validation fixes, found by checking every remaining
+  unguarded `float()`/`.get()` call in `config.py` after those fixes.
