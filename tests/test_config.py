@@ -15,6 +15,24 @@ def test_null_task_is_empty_not_the_string_none():
     assert cfg.task == ""
 
 
+def test_task_as_a_list_raises_a_clear_error_instead_of_corrupting_silently():
+    """'task:' given as a list (e.g. a stray '- ' before each word, or a YAML flow list
+    typed by mistake) used to pass through unvalidated: `str(data.get("task") or "")`
+    stringified it to the Python repr `"['pick', 'the', 'cube']"` and wrote that garbled
+    text as the dataset's task description, with no error at all -- not a crash, a
+    silent data-correctness bug like 'names'/'fields' as a scalar."""
+    with pytest.raises(ConfigError, match="'task' must be a string"):
+        parse_config({**BASE, "task": ["pick", "the", "cube"]})
+
+
+def test_robot_type_as_a_mapping_raises_a_clear_error():
+    """'robot_type:' given as a mapping (e.g. nested fields by mistake) used to pass
+    through unvalidated straight into info.json and the Hub dataset card, instead of
+    the clear 'must be a string' every other string-typed config field already gets."""
+    with pytest.raises(ConfigError, match="'robot_type' must be a string"):
+        parse_config({**BASE, "robot_type": {"name": "so101"}})
+
+
 @pytest.mark.parametrize("bad", [["fps", 30], "just text", 42, None])
 def test_non_mapping_config_raises_a_clear_error(bad):
     """A config that doesn't parse to a YAML mapping (e.g. 'features:' indented as a
