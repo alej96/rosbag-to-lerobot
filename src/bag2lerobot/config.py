@@ -145,6 +145,13 @@ def parse_config(data: dict) -> Config:
             )
         )
 
+    raw_task = data.get("task")
+    if raw_task is not None and not isinstance(raw_task, str):
+        raise ConfigError(f"'task' must be a string, got {raw_task!r}")
+    raw_robot_type = data.get("robot_type")
+    if raw_robot_type is not None and not isinstance(raw_robot_type, str):
+        raise ConfigError(f"'robot_type' must be a string, got {raw_robot_type!r}")
+
     sync = data.get("sync", {}) or {}
     if not isinstance(sync, dict):
         raise ConfigError(f"'sync' must be a mapping, got {type(sync).__name__}")
@@ -179,8 +186,8 @@ def parse_config(data: dict) -> Config:
     cfg = Config(
         fps=_as_float(data["fps"], "'fps'"),
         features=features,
-        task=str(data.get("task") or ""),
-        robot_type=data.get("robot_type"),
+        task=raw_task or "",
+        robot_type=raw_robot_type,
         sync=sync.get("method", "hold"),
         max_staleness_s=_as_float(sync.get("max_staleness_s", 0.25), "sync.max_staleness_s"),
         time_source=data.get("time_source", "header"),
