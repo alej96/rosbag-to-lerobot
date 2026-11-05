@@ -412,3 +412,22 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   no review) because this was a concrete crash-to-clear-error gap, in the same family as
   several previous sessions' config-validation fixes, found by checking every remaining
   unguarded `float()`/`.get()` call in `config.py` after those fixes.
+- 2026-11-05: Fixed `config.parse_config`: `task` and `robot_type` had no type
+  validation, unlike every other string-typed config field (`split_on`, `split_csv`,
+  `msg_dir`). `task: [pick, the, cube]` (a YAML list from a stray indentation typo)
+  used to pass straight through `str(data.get("task") or "")`, which stringified it to
+  the Python repr `"['pick', 'the', 'cube']"` and silently wrote that garbled text as
+  the dataset's task description -- not a crash, a silent data-correctness bug like the
+  `names`/`fields`-as-a-scalar fix three sessions ago. `robot_type` given as a
+  non-string (e.g. a mapping) had the same gap, flowing unvalidated into `info.json`
+  and the Hub dataset card. Both now raise a clear `ConfigError` up front.
+  `tests/test_config.py::test_task_as_a_list_raises_a_clear_error_instead_of_corrupting_silently`
+  and `::test_robot_type_as_a_mapping_raises_a_clear_error` reproduce both (fail on the
+  old code with the task/robot_type silently accepted, pass now with a clear
+  `ConfigError`). Picked over "Stream extraction of a single huge bag" again (now
+  deferred fifteen sessions running, for the same reason as before: it needs `sync.py`
+  to resample incrementally while a window's bounds are still being discovered, which
+  risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a
+  branch that auto-merges with no review) because this was a concrete silent-data-
+  corruption gap in the same family as several previous config-validation fixes, found
+  by checking every config field for the same string/type coverage after that pattern.
