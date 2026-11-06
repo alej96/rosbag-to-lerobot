@@ -135,3 +135,19 @@ def test_non_mapping_sync_raises_a_clear_error():
     ConfigError."""
     with pytest.raises(ConfigError, match="'sync' must be a mapping"):
         parse_config({**BASE, "sync": ["hold"]})
+
+
+def test_trim_to_overlap_as_a_list_raises_a_clear_error_instead_of_corrupting_silently():
+    """'sync.trim_to_overlap' had no type check, unlike every sibling config field:
+    ``bool(sync.get("trim_to_overlap", True))`` silently coerced *any* non-bool value
+    via Python truthiness, so a stray YAML list (or mapping) -- e.g. a '- false' typo
+    under 'trim_to_overlap:' -- became `True` regardless of its contents, with no error
+    at all. Not a crash, a silent data-correctness bug like 'task'/'robot_type' as the
+    wrong type: trim_to_overlap directly controls which frames an episode keeps."""
+    with pytest.raises(ConfigError, match="sync.trim_to_overlap must be true or false"):
+        parse_config({**BASE, "sync": {"trim_to_overlap": [False]}})
+
+
+def test_trim_to_overlap_true_and_false_are_accepted():
+    assert parse_config({**BASE, "sync": {"trim_to_overlap": True}}).trim_to_overlap is True
+    assert parse_config({**BASE, "sync": {"trim_to_overlap": False}}).trim_to_overlap is False

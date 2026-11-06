@@ -155,6 +155,9 @@ def parse_config(data: dict) -> Config:
     sync = data.get("sync", {}) or {}
     if not isinstance(sync, dict):
         raise ConfigError(f"'sync' must be a mapping, got {type(sync).__name__}")
+    trim_to_overlap = sync.get("trim_to_overlap", True)
+    if not isinstance(trim_to_overlap, bool):
+        raise ConfigError(f"sync.trim_to_overlap must be true or false, got {trim_to_overlap!r}")
     split_on = data.get("split_on")
     if split_on is not None and not isinstance(split_on, str):
         raise ConfigError("'split_on' must be a topic name (string)")
@@ -191,7 +194,7 @@ def parse_config(data: dict) -> Config:
         sync=sync.get("method", "hold"),
         max_staleness_s=_as_float(sync.get("max_staleness_s", 0.25), "sync.max_staleness_s"),
         time_source=data.get("time_source", "header"),
-        trim_to_overlap=bool(sync.get("trim_to_overlap", True)),
+        trim_to_overlap=trim_to_overlap,
         split_on=split_on or None,
         split_idle_gap_s=split_idle_gap_s,
         split_csv=split_csv or None,
