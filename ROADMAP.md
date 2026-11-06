@@ -109,6 +109,13 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       explaining that H.264's yuv420p needs both dimensions even. `_open_video_streams`
       now checks every image feature's resolution before opening any container and
       raises a clear `ValueError` naming the feature and its resolution.
+- [x] **Reject a non-bool `sync.trim_to_overlap` with a clear error.** Every other config
+      field got strict type validation across the last several sessions, but
+      `trim_to_overlap` was still passed through Python's `bool(...)`, which coerces any
+      non-empty list or mapping to `True` regardless of its contents. A stray YAML typo
+      (e.g. `trim_to_overlap: [false]` from an accidental list) silently kept the default
+      trimming behavior instead of raising an error -- a silent correctness bug, since
+      this flag controls which frames an episode keeps.
 
 ## Needs the owner
 
@@ -431,3 +438,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-06: Fixed `config.parse_config`: `sync.trim_to_overlap` was the one config
+  field left over from the string/type-validation sweep of the last several sessions --
+  it still went straight into Python's `bool(...)`, which coerces any non-empty list or
+  mapping to `True` regardless of its actual content. `trim_to_overlap: [false]` (a
+  stray YAML list typo) silently kept the default `True` trimming behavior instead of
+  raising an error, with no indication anything was wrong -- a silent correctness bug,
+  since this flag decides whether an episode is trimmed to the window where every stream
+  overlaps or spans the full untrimmed range. `trim_to_overlap` now raises a clear
+  `ConfigError` for any non-bool value, the same as every other field this sweep already
+  covers. `tests/test_config.py::
+  test_trim_to_overlap_as_a_list_raises_a_clear_error_instead_of_corrupting_silently`
+  reproduces it (fails on the old code with `trim_to_overlap` silently `True`, passes
+  now with a clear `ConfigError`); a sibling test checks `True`/`False` are still
+  accepted. Picked over "Stream extraction of a single huge bag" again (now deferred
+  sixteen sessions running, for the same reason as before: it needs `sync.py` to
+  resample incrementally while a window's bounds are still being discovered, which
+  risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch
+  that auto-merges with no review) because this was the one remaining gap in the
+  config-validation pattern several previous sessions already established, found by
+  checking every field in `parse_config` against that pattern one more time.
