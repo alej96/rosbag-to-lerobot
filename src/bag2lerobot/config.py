@@ -86,6 +86,8 @@ def parse_config(data: dict) -> Config:
     for key, spec in raw_features.items():
         if not isinstance(spec, dict) or "topic" not in spec:
             raise ConfigError(f"feature '{key}' needs a 'topic'")
+        if not isinstance(spec["topic"], str):
+            raise ConfigError(f"feature '{key}': 'topic' must be a string, got {spec['topic']!r}")
         feat_type = spec.get("type", "numeric")
         if feat_type not in FEATURE_TYPES:
             raise ConfigError(

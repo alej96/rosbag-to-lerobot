@@ -89,6 +89,19 @@ def test_names_from_as_a_list_raises_a_clear_error():
         parse_config({"fps": 30, "features": {"a": {"topic": "/t", "names_from": ["name"]}}})
 
 
+def test_topic_as_a_list_raises_a_clear_error():
+    """'topic: [/joint_states]' (a one-item list from a stray '- ' typo) instead of
+    'topic: /joint_states' (a string) used to pass through unvalidated -- every other
+    feature field gets a clear type check, but 'topic' never did. The list then reached
+    extract.py's `by_topic.setdefault(spec.topic, [])`, which needs a hashable key and
+    crashed with a raw, unhandled `TypeError: unhashable type: 'list'` -- not even a
+    ValueError, so unlike every other bad-config path in this file, cli.main's exception
+    tuple doesn't catch it and it reached the user as an uncaught traceback instead of
+    the usual 'bag2lerobot: ...' message."""
+    with pytest.raises(ConfigError, match="'topic' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": ["/joint_states"]}}})
+
+
 def test_names_as_a_proper_list_is_unaffected():
     cfg = parse_config(
         {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": ["x", "y", "z"]}}}
