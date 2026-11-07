@@ -103,6 +103,12 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       `bag2lerobot init`'s fps guess, so a bursty topic could previously have produced a
       nonsensical `fps:` in the generated config, not just a confusing `inspect` display.
 
+- [x] **Reject a non-string feature `topic` with a clear error.** Every other
+      feature-spec field (`field`, `fields`, `names`, `names_from`, `sync`) was validated
+      against a stray YAML typo, but `topic` itself never was. A one-item list from a
+      stray `- ` (e.g. `topic:` indented as a list instead of a scalar) crashed deep in
+      `extract.py` with a raw, unhandled `TypeError: unhashable type: 'list'` instead of
+      a clear `ConfigError`.
 - [x] **Reject an odd video resolution with a clear error.** A camera with an odd width
       or height (e.g. a cropped ROI) reached PyAV/ffmpeg before failing, which raised an
       opaque `avcodec_open2(...) Generic error in an external library` instead of
@@ -431,3 +437,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-07: Fixed `config.parse_config`: a feature's `topic` had no type validation,
+  unlike every other feature-spec field (`field`, `fields`, `names`, `names_from`,
+  `sync`) which already rejects a stray YAML typo with a clear `ConfigError`. `topic:`
+  given as a one-item list (e.g. a stray `- ` before the topic name, or `topic:`
+  indented as a list by mistake) used to pass straight through into `FeatureSpec.topic`
+  unvalidated, then crash deep in `extract.py` with a raw, unhandled
+  `TypeError: unhashable type: 'list'` ( `by_topic.setdefault(spec.topic, [])` needs a
+  hashable key) -- not even a `ValueError`, so unlike every other bad-config path in this
+  file, `cli.main`'s exception tuple doesn't catch it and it reaches the user as an
+  uncaught traceback instead of the usual `bag2lerobot: ...` message.
+  `tests/test_config.py::test_topic_as_a_list_raises_a_clear_error` reproduces it (fails
+  on the old code with `DID NOT RAISE ConfigError`, passes now). Picked over "Stream
+  extraction of a single huge bag" again (now deferred sixteen sessions running, for the
+  same reason as before: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because
+  this was a concrete crash-to-clear-error gap in the one feature-spec field that had
+  never been checked, found by re-checking every field in `parse_config`'s feature loop
+  against the type-validation pattern several previous sessions already established for
+  `field`/`fields`/`names`/`names_from`/`sync`.
