@@ -431,3 +431,27 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-08: Fixed `extract._canonical_order`: a `names_from` feature (e.g. a
+  `JointState` reordered to a stable joint order) looked up each name's position with
+  `{n: i for i, n in enumerate(names)}` to remap a later, differently-ordered message
+  back to the established order. A genuine duplicate name in that message (a driver
+  bug -- the same joint listed twice) made that lookup ambiguous: the dict keeps only
+  the last occurrence, so a message with names `['b', 'a', 'a']` and positions
+  `[10, 20, 30]` against an established order of `['a', 'a', 'b']` silently became
+  `[30, 30, 10]` -- both `'a'` slots got the second occurrence's value and the real
+  second value (20) was dropped -- not a crash, a silently wrong column, in the same
+  family as the `names`/`fields`-as-a-scalar and multi-field reorder bugs found in
+  earlier sessions. Only reachable once a message's names actually need reordering
+  (matching the established order already short-circuits), so a duplicate name that
+  never gets shuffled across messages was never affected. Now raises a clear
+  `ExtractError` instead. `tests/test_convert.py::
+  test_duplicate_joint_names_rejected_instead_of_silently_reordered_wrong` reproduces it
+  with a hand-written two-message bag (fails on the old code with the silently wrong
+  values above, passes now with a clear error). Picked over "Stream extraction of a
+  single huge bag" again (now deferred sixteen sessions running, for the same reason as
+  before: it needs `sync.py` to resample incrementally while a window's bounds are
+  still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because
+  this was a concrete silent-data-corruption bug in the reorder-safety logic the
+  "stable joint order" feature depends on, found while re-checking that logic for the
+  same kind of ambiguous-lookup bug the duplicate-name case exposes.
