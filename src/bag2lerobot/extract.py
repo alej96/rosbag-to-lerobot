@@ -434,6 +434,14 @@ def _canonical_order(
         return vec, names
     if sorted(names) != sorted(order):
         raise ExtractError(f"'{spec.key}': joint names changed from {order} to {names}")
+    if len(set(names)) != len(names):
+        # a duplicate name makes "index of this name" ambiguous: {n: i for ...} keeps
+        # only the last occurrence, so a reorder would silently pick the wrong element
+        # (or the same element twice) for a message whose names aren't already in the
+        # established order, instead of actually reordering it.
+        raise ExtractError(
+            f"'{spec.key}': names_from has a duplicate name in {names}, can't reorder safely"
+        )
     index = {n: i for i, n in enumerate(names)}
     return vec[[index[n] for n in order]], list(order)
 

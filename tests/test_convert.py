@@ -165,6 +165,60 @@ def test_joint_order_is_stable_with_multiple_fields_from_one_names_from(make_bag
     assert np.abs(state[:, 3:] - velocity_signal(t)).max() < 0.02
 
 
+def test_duplicate_joint_names_rejected_instead_of_silently_reordered_wrong(tmp_path):
+    """names_from's reorder-safety (`_canonical_order`) looks up each name's position
+    with `{n: i for i, n in enumerate(names)}`, which keeps only the last occurrence of
+    a repeated name. A JointState with a genuine duplicate (a driver bug, e.g. the same
+    joint listed twice) therefore used to silently reorder to the wrong values instead
+    of raising: a message with names ['b', 'a', 'a'] and positions [10, 20, 30] against
+    an established order of ['a', 'a', 'b'] silently became [30, 30, 10] -- both 'a'
+    slots got the second occurrence's value and the real second value (20) vanished --
+    not a crash, a silently wrong column."""
+    from rosbags.rosbag2 import StoragePlugin
+    from rosbags.rosbag2 import Writer as Writer2
+    from rosbags.typesys import Stores, get_typestore
+
+    ts = get_typestore(Stores.ROS2_HUMBLE)
+    T = ts.types
+    msgtype = "sensor_msgs/msg/JointState"
+
+    def joint_state(t: float, names: list[str], pos: list[float]):
+        return T[msgtype](
+            header=T["std_msgs/msg/Header"](
+                stamp=T["builtin_interfaces/msg/Time"](sec=int(t), nanosec=0), frame_id="base"
+            ),
+            name=names,
+            position=np.array(pos, dtype=np.float64),
+            velocity=np.zeros(0, dtype=np.float64),
+            effort=np.zeros(0, dtype=np.float64),
+        )
+
+    bag = tmp_path / "bag"
+    writer = Writer2(bag, version=9, storage_plugin=StoragePlugin.MCAP)
+    with writer:
+        conn = writer.add_connection("/follower/joint_states", msgtype, typestore=ts)
+        writer.write(
+            conn, 0, ts.serialize_cdr(joint_state(0, ["a", "a", "b"], [1.0, 2.0, 3.0]), msgtype)
+        )
+        writer.write(
+            conn,
+            int(1e9),
+            ts.serialize_cdr(joint_state(1, ["b", "a", "a"], [10.0, 20.0, 30.0]), msgtype),
+        )
+
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "fps: 1\n"
+        "features:\n"
+        "  observation.state:\n"
+        "    topic: /follower/joint_states\n"
+        "    field: position\n"
+        "    names_from: name\n"
+    )
+    with pytest.raises(ExtractError, match="duplicate name"):
+        extract_streams(bag, load_config(cfg_path))
+
+
 def test_multiple_bags_become_episodes(make_bag, config_file, tmp_path):
     bags = [
         make_bag("mcap", BagSpec(seconds=2.0, seed=1), name="a"),
