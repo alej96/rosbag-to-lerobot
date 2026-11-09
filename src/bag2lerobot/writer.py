@@ -19,6 +19,14 @@ VIDEO_PATH = "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.m
 VIDEO_CODEC = "libx264"
 VIDEO_PIX_FMT = "yuv420p"
 DEFAULT_DATA_FILES_SIZE_IN_MB = 100.0
+# LeRobotDataset's default tolerance_s (lerobot/datasets/lerobot_dataset.py) for matching a
+# requested frame's "timestamp" to a decoded video frame's pts; exceeding it raises a
+# FrameTimestampError when loading that frame's video. The "timestamp" column's dtype is
+# fixed to float32 by LeRobot itself (DEFAULT_FEATURES overrides whatever dtype a dataset
+# declares for it), so a long enough episode's float32-rounded timestamp drifts from the
+# exact frame_index/fps value by more than this -- not something this writer's own choice of
+# on-disk dtype can fix, since the loader casts back to float32 on read regardless.
+VIDEO_TIMESTAMP_TOLERANCE_S = 1e-4
 INDEX_FEATURES = {
     "timestamp": "float32",
     "frame_index": "int64",
@@ -164,6 +172,20 @@ def write_dataset(
 
             ep_idx = episode_offset + i
             n = ep.sync.frames
+            timestamp = (np.arange(n) / fps).astype(np.float32)
+            if image_keys and n:
+                max_err = float(np.abs(timestamp.astype(np.float64) - np.arange(n) / fps).max())
+                if max_err > VIDEO_TIMESTAMP_TOLERANCE_S:
+                    raise ValueError(
+                        f"episode {ep_idx} has {n} frames at {fps:g} fps ({n / fps:.1f}s): "
+                        f"storing 'timestamp' as float32 (LeRobot's fixed dtype for that "
+                        f"column) would be off by up to {max_err:.6f}s, more than "
+                        f"LeRobotDataset's {VIDEO_TIMESTAMP_TOLERANCE_S:g}s tolerance for "
+                        "matching a requested frame to a decoded video frame -- its video "
+                        "would fail to load with a FrameTimestampError. Split this episode "
+                        "into shorter ones (e.g. 'split_idle_gap_s' or 'split_on') before "
+                        "converting."
+                    )
             frame = {
                 k: (
                     ep.sync.values[k][:, 0].astype(np.float32)
@@ -173,7 +195,7 @@ def write_dataset(
                 for k in keys
             }
             frame.update(
-                timestamp=(np.arange(n) / fps).astype(np.float32),
+                timestamp=timestamp,
                 frame_index=np.arange(n, dtype=np.int64),
                 episode_index=np.full(n, ep_idx, dtype=np.int64),
                 index=np.arange(index, index + n, dtype=np.int64),

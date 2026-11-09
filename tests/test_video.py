@@ -9,7 +9,8 @@ import pytest
 from bag2lerobot.config import ConfigError, load_config, parse_config
 from bag2lerobot.convert import convert
 from bag2lerobot.extract import ExtractError, decode_image, extract_image_streams, extract_streams
-from bag2lerobot.sync import synchronize
+from bag2lerobot.sync import SyncResult, synchronize
+from bag2lerobot.writer import Episode, write_dataset
 from tests.conftest import BagSpec
 
 IMAGE_CONFIG = """
@@ -284,3 +285,35 @@ def test_image_feature_rejects_linear_sync(tmp_path):
     )
     with pytest.raises(ConfigError, match="only support sync 'hold'"):
         load_config(cfg_path)
+
+
+def _huge_episode(n: int, with_image: bool) -> Episode:
+    images = {"observation.images.cam": [np.zeros((2, 2, 3), dtype=np.uint8)]} if with_image else {}
+    sync = SyncResult(
+        t0=0.0,
+        frames=n,
+        values={"observation.state": np.zeros((n, 1), dtype=np.float32)},
+        names={"observation.state": ["x"]},
+        images=images,
+    )
+    return Episode(sync=sync, task="pick the cube")
+
+
+def test_long_episode_with_video_rejected_before_producing_unloadable_video(tmp_path):
+    """A single episode of 100_000 frames at 30fps (~55min) stores 'timestamp' with a
+    float32 rounding error (~0.11ms) past LeRobotDataset's 0.1ms video-frame lookup
+    tolerance; LeRobot fixes that column's dtype to float32 regardless of what this
+    writer puts on disk, so it can't be fixed here -- only caught early instead of
+    reaching the user as a FrameTimestampError deep inside LeRobotDataset/PyTorch."""
+    out = tmp_path / "ds"
+    with pytest.raises(ValueError, match="FrameTimestampError"):
+        write_dataset(out, [_huge_episode(100_000, with_image=True)], fps=30.0, robot_type=None)
+
+
+def test_long_episode_without_video_is_not_rejected(tmp_path):
+    """The float32 timestamp drift only matters for looking up video frames by
+    timestamp; a dataset with no video feature has nothing to look up, so the same
+    frame count must convert without error."""
+    out = tmp_path / "ds"
+    info = write_dataset(out, [_huge_episode(100_000, with_image=False)], fps=30.0, robot_type=None)
+    assert info["total_frames"] == 100_000
