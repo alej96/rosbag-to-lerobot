@@ -110,6 +110,15 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       now checks every image feature's resolution before opening any container and
       raises a clear `ValueError` naming the feature and its resolution.
 
+- [x] **Reject a too-long video episode before it's unloadable.** LeRobot fixes a
+      dataset's `timestamp` column to `float32` regardless of what this writer puts on
+      disk; past roughly 40+ minutes of frames (depends on `fps`) that rounding error
+      exceeds `LeRobotDataset`'s video-frame lookup tolerance, so the episode's video
+      would fail to load with a `FrameTimestampError` -- not something this writer can
+      fix (the loader casts back to `float32` on read no matter the on-disk dtype), only
+      catch early with an actionable message (split the episode) instead of a late,
+      confusing training-time failure.
+
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
@@ -431,3 +440,34 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-09: Fixed `writer.write_dataset`: a single episode with a video feature and
+  enough frames (roughly 40+ minutes at a typical fps, exact threshold depends on fps)
+  used to convert "successfully" into a dataset whose video silently couldn't be loaded.
+  LeRobot's `DEFAULT_FEATURES` fixes the `timestamp` column's dtype to `float32`
+  regardless of what a dataset declares or writes on disk, so a long enough episode's
+  `frame_index / fps` rounds to a stored value off by more than LeRobotDataset's default
+  `1e-4s` video-frame lookup tolerance (`decode_video_frames_torchvision`'s
+  `tolerance_s` check) -- confirmed by downloading the real `lerobot` wheel and reading
+  its source, since installing `torch`/`lerobot` in this sandbox was blocked (see below).
+  The result was a `FrameTimestampError` deep in `LeRobotDataset.__getitem__`, far from
+  conversion time and with no hint the cause was episode length. Not fixable by picking a
+  different on-disk dtype (LeRobot casts back to `float32` on read regardless), so
+  `write_dataset` now computes the float32 rounding error for the actual `(n, fps)` and
+  raises a clear `ValueError` before encoding any video, naming the problem and pointing
+  at `split_idle_gap_s`/`split_on`/`split_csv`. Numeric-only episodes (no video feature)
+  are unaffected -- nothing looks up a numeric frame by timestamp.
+  `tests/test_video.py::test_long_episode_with_video_rejected_before_producing_unloadable_video`
+  and `::test_long_episode_without_video_is_not_rejected` construct a `SyncResult`/
+  `Episode` directly (100,000 frames at 30fps) rather than a real multi-gigabyte bag, and
+  reproduce it (the first fails on the old code with `DID NOT RAISE`, both pass now).
+  Found while reading `sync.py`/`writer.py` again for the "Stream extraction of a single
+  huge bag" risk (deferred again, now sixteen sessions running, for the same reason as
+  before: it needs `sync.py` to resample incrementally while a window's bounds are still
+  being discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
+  invariants on a branch that auto-merges with no review) -- this was a concrete instance
+  of exactly that invariant already silently breaking for a realistic long single-bag
+  episode, not yet the memory problem that item is about. `torch`/`lerobot[dataset]`
+  couldn't be installed locally this session to re-run `pytest -m lerobot`: the CPU wheel
+  index (`download.pytorch.org`) is blocked by this sandbox's proxy policy, and the
+  default PyPI `torch` wheel pulls its full CUDA dependency closure (3GB+), which this
+  session's disk allowance couldn't safely absorb; CI still installs and runs it.

@@ -170,6 +170,14 @@ the one currently being processed. A single bag that is itself huge (hours of da
 video, in one file) still loads that one bag's samples and decoded frames in full before
 writing it, which is not yet streamed and is tracked as a follow-up.
 
+An episode with a video feature and roughly 40+ minutes of frames (exact threshold
+depends on `fps`) is rejected with a clear error before any video is encoded: LeRobot
+stores every episode's per-frame `timestamp` as `float32` regardless of what this tool
+writes to disk, and beyond that length the rounding error exceeds LeRobotDataset's
+frame-lookup tolerance, so its video would otherwise fail to load with a
+`FrameTimestampError` much later, during training rather than conversion. Split a bag
+this long into shorter episodes first (`split_idle_gap_s`, `split_on` or `split_csv`).
+
 ### Custom message types
 
 Most bags carry their own message definitions, so `bag2lerobot` reads them without a ROS
