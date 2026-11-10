@@ -41,9 +41,13 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
     ]
     for i, r in enumerate(reports):
         label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
+        # SyncResult.stale_frames (max across streams), not a sum of each stream's own
+        # count: the same frame is routinely stale in more than one stream at once (e.g.
+        # every stream goes quiet together during one gap), and summing them double-
+        # counts a frame once per affected stream instead of once per episode -- out of
+        # step with the per-episode count '--strict' and every other report use.
         gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
-        lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
+        lines.append(f"| {label} | {i} | {r.sync.frames} | {r.sync.stale_frames} | {gap:.3f} |")
 
     lines += ["", "## Features", "", "| key | dtype | shape |", "|---|---|---|"]
     for key, feat in info["features"].items():

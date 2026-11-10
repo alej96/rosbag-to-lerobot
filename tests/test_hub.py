@@ -11,6 +11,7 @@ from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.convert import convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from tests.conftest import BagSpec
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -56,6 +57,29 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_dataset_card_stale_frames_matches_the_episode_count_not_a_sum_over_streams(
+    make_bag, config_file, tmp_path
+):
+    """The card's 'stale frames' column used to be `sum(s.stale_frames for s in
+    r.sync.streams)`, adding every stream's stale count together even though the same
+    frame is routinely stale in more than one stream at once (e.g. all streams go quiet
+    together during one idle gap, exactly what this config_file's three features do
+    here). That triple-counts an episode's actual stale frames instead of reporting the
+    same per-episode count `SyncResult.stale_frames` (and `--strict`) already use."""
+    bag = make_bag(spec=BagSpec(idle_gap=(1.0, 1.5)))
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(config_file), out)
+    info = json.loads((out / "meta" / "info.json").read_text())
+    r = reports[0]
+
+    assert sum(s.stale_frames for s in r.sync.streams) > r.sync.stale_frames  # the bug's setup
+
+    card = dataset_card("me/my-dataset", load_config(config_file), info, reports)
+
+    row = next(line for line in card.splitlines() if line.startswith(f"| {r.bag.name} |"))
+    assert f"| {r.sync.stale_frames} |" in row
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(
