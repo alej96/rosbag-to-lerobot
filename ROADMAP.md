@@ -431,3 +431,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-10: Fixed `hub.dataset_card`: the "stale frames" column for each source bag
+  summed every stream's own `stale_frames` together, instead of reusing
+  `SyncResult.stale_frames` (the per-episode count already used by `--strict` and the
+  CLI's convert output). The same frame routinely goes stale in more than one stream at
+  once -- most obviously when every stream shares one idle gap, exactly what the `--push-
+  to-hub` dataset card exists to flag -- so summing triple-counted it (23 reported vs. 8
+  actually stale, in a 3-feature config over one shared gap) instead of reporting the
+  same number everywhere else in the tool. `tests/test_hub.py::
+  test_dataset_card_stale_frames_matches_the_episode_count_not_a_sum_over_streams`
+  reproduces it with a bag whose idle gap hits all three configured features at once
+  (fails on the old code with `23` in the card's row where `8` -- `SyncResult.
+  stale_frames` -- was expected, passes now). Picked over "Stream extraction of a single
+  huge bag" again (now deferred sixteen sessions running, for the same reason as before:
+  it needs `sync.py` to resample incrementally while a window's bounds are still being
+  discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
+  invariants on a branch that auto-merges with no review) because this was a concrete,
+  user-facing data-quality metric that actively misreports on a real dataset once pushed
+  to the Hub, found while reading `hub.py` for inconsistencies with `sync.py`'s own
+  established stale-frame convention. Installing `lerobot[dataset]`/`torch` for the
+  compatibility test failed in this session (proxy blocked `download.pytorch.org`); the
+  `lerobot`-marked tests self-skipped as designed, and CI (which has full network access)
+  still runs them.
