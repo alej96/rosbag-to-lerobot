@@ -431,3 +431,21 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-11: Fixed `hub.dataset_card`: the "stale frames" column summed every stream's
+  per-stream `stale_frames` count, so an episode where two streams went stale over the
+  same shared gap (a realistic case -- e.g. both `observation.state` and `action` lose
+  data at once when the whole setup pauses) reported double the real count on the
+  dataset card published to the Hub (80 "stale frames" for an episode with only 40 of
+  its 100 frames ever stale), misleading anyone judging the dataset's quality from the
+  card. Switched to the episode-level `SyncResult.stale_frames` property (already
+  defined as the max across streams, the same episode-level notion of staleness the
+  rest of the codebase uses) instead of re-deriving a different, double-counting sum.
+  `tests/test_hub.py::test_dataset_card_stale_count_is_not_double_counted_across_streams`
+  reproduces it (fails on the old code with "80" in the card, passes now with "40").
+  Picked over "Stream extraction of a single huge bag" again (now deferred sixteen
+  sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete, user-visible correctness bug
+  in Hub-published output, found while reading `hub.py` for how it aggregates per-stream
+  stats after the `sync.py`/`writer.py` stale-frame work from prior sessions.
