@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from bag2lerobot.cli import main
-from bag2lerobot.config import load_config
-from bag2lerobot.convert import convert
+from bag2lerobot.config import load_config, parse_config
+from bag2lerobot.convert import ConversionReport, convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from bag2lerobot.sync import StreamReport, SyncResult
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -56,6 +58,65 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_dataset_card_stale_count_is_not_double_counted_across_streams():
+    """Two streams stale over the same frames (e.g. both lost data in one shared gap)
+    used to make the card report the SUM of their per-stream stale counts -- 80 'stale
+    frames' for an episode where only 40 of its 100 frames were ever stale, more than
+    double the real number, because a frame stale in both streams at once was counted
+    twice instead of once."""
+    sync = SyncResult(
+        t0=0.0,
+        frames=100,
+        values={},
+        names={},
+        streams=[
+            StreamReport(
+                key="observation.state",
+                topic="/follower/joint_states",
+                messages=90,
+                rate_hz=90.0,
+                max_gap_s=0.5,
+                stale_frames=40,
+                max_staleness_s=0.25,
+            ),
+            StreamReport(
+                key="action",
+                topic="/leader/joint_states",
+                messages=90,
+                rate_hz=90.0,
+                max_gap_s=0.5,
+                stale_frames=40,
+                max_staleness_s=0.25,
+            ),
+        ],
+    )
+    reports = [ConversionReport(bag=Path("demo.bag"), sync=sync, segment=0)]
+    info = {
+        "total_episodes": 1,
+        "total_frames": 100,
+        "fps": 30,
+        "features": {
+            "observation.state": {"dtype": "float32", "shape": [3]},
+            "action": {"dtype": "float32", "shape": [3]},
+        },
+    }
+    cfg = parse_config(
+        {
+            "fps": 30,
+            "task": "pick the cube",
+            "features": {
+                "observation.state": {"topic": "/follower/joint_states", "field": "position"},
+                "action": {"topic": "/leader/joint_states", "field": "position"},
+            },
+        }
+    )
+
+    card = dataset_card("me/my-dataset", cfg, info, reports)
+
+    assert "| demo.bag | 0 | 100 | 40 | 0.500 |" in card
+    assert "80" not in card
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(

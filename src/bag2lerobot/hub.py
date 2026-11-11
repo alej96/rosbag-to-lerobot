@@ -41,7 +41,11 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
     ]
     for i, r in enumerate(reports):
         label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
+        # the episode's own stale count, not the sum of every stream's: a frame that's
+        # stale in two streams at once (e.g. both lost data in the same gap) is one
+        # stale frame, not two, and summing can report more stale frames than the
+        # episode even has.
+        stale = r.sync.stale_frames
         gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
         lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
 
