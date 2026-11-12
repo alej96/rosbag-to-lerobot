@@ -9,7 +9,7 @@ import pytest
 
 from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
-from bag2lerobot.convert import convert
+from bag2lerobot.convert import CONVERSION_LOG_PATH, convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
 
 
@@ -43,10 +43,11 @@ def test_push_to_hub_creates_repo_and_uploads(tmp_path, monkeypatch):
 def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp_path):
     bag = make_bag(name="demo")
     out = tmp_path / "ds"
-    reports = convert([bag], load_config(config_file), out)
+    convert([bag], load_config(config_file), out)
     info = json.loads((out / "meta" / "info.json").read_text())
+    log_rows = json.loads((out / CONVERSION_LOG_PATH).read_text())
 
-    card = dataset_card("me/my-dataset", load_config(config_file), info, reports)
+    card = dataset_card("me/my-dataset", load_config(config_file), info, log_rows)
 
     assert "me/my-dataset" in card
     assert "demo" in card  # source bag name
@@ -56,6 +57,26 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_append_keeps_earlier_bags_in_the_dataset_card(make_bag, config_file, tmp_path):
+    """Before this fix, a card built straight from one ``convert`` call's own
+    ``ConversionReport``s only ever described that call's bags: appending a second bag
+    and rebuilding the card silently dropped the first bag entirely and mislabeled the
+    second bag's episode as 0 (it's really episode 1 of the combined dataset)."""
+    out = tmp_path / "ds"
+    cfg = load_config(config_file)
+    convert([make_bag(name="first")], cfg, out)
+    convert([make_bag(name="second")], load_config(config_file), out, append=True)
+    info = json.loads((out / "meta" / "info.json").read_text())
+    log_rows = json.loads((out / CONVERSION_LOG_PATH).read_text())
+
+    card = dataset_card("me/my-dataset", cfg, info, log_rows)
+
+    assert "first" in card
+    assert "second" in card
+    assert "| first | 0 |" in card
+    assert "| second | 1 |" in card
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(

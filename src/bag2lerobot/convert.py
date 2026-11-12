@@ -26,6 +26,25 @@ class ConversionReport:
     segment: int = 0  # index of this episode within its source bag (when splitting is on)
 
 
+CONVERSION_LOG_PATH = "meta/conversion_log.json"
+
+
+def conversion_log_rows(reports: list[ConversionReport]) -> list[dict]:
+    """One dataset-card-sized summary row per episode in ``reports``: bag name, segment,
+    frame count and sync quality, without pinning the full ``SyncResult``/``StreamReport``
+    dataclasses (and the per-frame arrays some of them used to reference) into a JSON file."""
+    return [
+        {
+            "bag": r.bag.name,
+            "segment": r.segment,
+            "frames": r.sync.frames,
+            "stale_frames": sum(s.stale_frames for s in r.sync.streams),
+            "max_gap_s": max((s.max_gap_s for s in r.sync.streams), default=0.0),
+        }
+        for r in reports
+    ]
+
+
 def _windows(boundaries: list[float]) -> list[tuple[float, float]]:
     ends = [*boundaries[1:], float("inf")]
     return list(zip(boundaries, ends, strict=True))
@@ -140,7 +159,20 @@ def convert(
         if created and out.exists():
             shutil.rmtree(out)
         raise
+    _append_conversion_log(out, reports, append)
     return reports
+
+
+def _append_conversion_log(out: Path, reports: list[ConversionReport], append: bool) -> None:
+    """Keep ``meta/conversion_log.json`` -- the full, bag-by-bag history behind the Hub
+    dataset card -- in sync with the dataset. Without this, a card built straight from
+    one ``convert`` call's own ``reports`` (as ``--push-to-hub`` used to) only ever
+    describes that call's bags: a later ``--append`` run's card would silently drop
+    every earlier bag and mislabel its own episodes starting from 0 again, instead of
+    continuing the existing dataset's numbering."""
+    log_path = out / CONVERSION_LOG_PATH
+    existing_rows = json.loads(log_path.read_text()) if append and log_path.exists() else []
+    log_path.write_text(json.dumps(existing_rows + conversion_log_rows(reports), indent=2))
 
 
 def _seed_joint_order(out: Path, cfg: Config) -> dict[str, list[str]]:

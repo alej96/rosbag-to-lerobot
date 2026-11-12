@@ -9,7 +9,7 @@ from pathlib import Path
 
 from bag2lerobot import __version__
 from bag2lerobot.config import ConfigError, load_config
-from bag2lerobot.convert import convert, preview_splits
+from bag2lerobot.convert import CONVERSION_LOG_PATH, convert, preview_splits
 from bag2lerobot.extract import ExtractError, inspect_bag
 from bag2lerobot.hub import dataset_card, push_to_hub
 from bag2lerobot.init import generate_config
@@ -194,7 +194,8 @@ def _convert(args) -> int:
         return 1
     if args.push_to_hub:
         info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
-        card = dataset_card(args.push_to_hub, cfg, info, reports)
+        log_rows = json.loads((Path(args.out) / CONVERSION_LOG_PATH).read_text())
+        card = dataset_card(args.push_to_hub, cfg, info, log_rows)
         (Path(args.out) / "README.md").write_text(card)
         url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
         print(f"pushed to {url}")
