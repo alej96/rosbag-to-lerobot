@@ -41,7 +41,9 @@ one small YAML file.
   (e.g. a gripper command on `std_msgs/Float64`) as `action.<name>`/
   `observation.state.<name>` candidates, using the same name hints as joints
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
-  dataset card (source bags, sync quality, features); needs the `hub` extra
+  dataset card (source bags, sync quality, features); needs the `hub` extra. The card's
+  "Source bags" table covers every bag the dataset holds, including ones added by an
+  earlier `--append` call, not just the bags from the `convert` call that pushed it
 - `msg_dir` registers custom message types from `.msg` files for bags that use types
   `rosbags` doesn't ship and that aren't embedded in the bag itself
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`

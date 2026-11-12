@@ -431,3 +431,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-12: Fixed the Hub dataset card losing history across `--append`: `--push-to-hub`
+  built the card straight from the just-finished `convert` call's own `ConversionReport`s,
+  so appending a second bag and re-pushing silently dropped every earlier bag from the
+  README's "Source bags" table and mislabeled the new bag's episode as `0` (it's really
+  episode `1`+ of the combined dataset) -- not a crash, a silently wrong/incomplete
+  published artifact on exactly the incremental-conversion-plus-Hub workflow `--append`
+  exists for. `convert()` now keeps `meta/conversion_log.json` (bag, segment, frames,
+  stale frames, max gap per episode, extended rather than replaced on `--append`) as the
+  card's source of truth instead of one call's `reports`; `dataset_card` takes that log's
+  rows instead of `list[ConversionReport]`. `tests/test_hub.py::
+  test_append_keeps_earlier_bags_in_the_dataset_card` reproduces it (fails on the old code
+  -- the first bag is gone and the second is mislabeled episode `0` -- passes now).
+  `meta/conversion_log.json` is bag2lerobot's own file, never read by the real
+  `LeRobotDataset` loader, so this carries no risk to the `pytest -m lerobot` invariant.
+  Picked over "Stream extraction of a single huge bag" again (now deferred sixteen
+  sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete, silently-wrong published
+  artifact on a realistic workflow, found while auditing `cli.py`/`hub.py`/`convert.py`
+  (areas with fewer recent fixes than `config.py`/`sync.py`/`writer.py`) for the kind of
+  gap this session's earlier fixes have been finding there.
