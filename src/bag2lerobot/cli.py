@@ -146,6 +146,18 @@ def _dry_run(args, cfg) -> int:
     return 0
 
 
+_ALWAYS_REUPLOADED = {
+    Path("meta/info.json"),
+    Path("meta/stats.json"),
+    Path("meta/tasks.parquet"),
+    Path("README.md"),
+}
+
+
+def _files_under(out: Path) -> set[Path]:
+    return {p.relative_to(out) for p in out.rglob("*") if p.is_file()} if out.exists() else set()
+
+
 def _convert(args) -> int:
     cfg = load_config(args.config)
     if args.task:
@@ -160,6 +172,12 @@ def _convert(args) -> int:
     if args.append and args.overwrite:
         print("bag2lerobot: --append and --overwrite can't be used together", file=sys.stderr)
         return 2
+    # --append never touches a file already on disk (each call only adds new data,
+    # episode-metadata and video files alongside the old ones -- see writer.write_dataset),
+    # so a re-push after --append can upload just what changed instead of the whole
+    # dataset again: everything new since this call started, plus the small metadata
+    # files write_dataset always rewrites in place.
+    files_before = _files_under(Path(args.out)) if args.append and args.push_to_hub else None
     reports = convert(
         args.bags,
         cfg,
@@ -193,10 +211,17 @@ def _convert(args) -> int:
         print("bag2lerobot: stale frames found (--strict)", file=sys.stderr)
         return 1
     if args.push_to_hub:
-        info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
+        out = Path(args.out)
+        info = json.loads((out / "meta" / "info.json").read_text())
         card = dataset_card(args.push_to_hub, cfg, info, reports)
-        (Path(args.out) / "README.md").write_text(card)
-        url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
+        (out / "README.md").write_text(card)
+        changed_files = None
+        if files_before is not None:
+            files_after = _files_under(out)
+            changed_files = sorted(
+                (files_after - files_before) | (_ALWAYS_REUPLOADED & files_after)
+            )
+        url = push_to_hub(out, args.push_to_hub, private=args.private, changed_files=changed_files)
         print(f"pushed to {url}")
     return 0
 

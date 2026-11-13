@@ -54,8 +54,16 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
     return "\n".join(lines)
 
 
-def push_to_hub(out: Path, repo_id: str, private: bool = False) -> str:
+def push_to_hub(
+    out: Path, repo_id: str, private: bool = False, changed_files: list[Path] | None = None
+) -> str:
     """Create (or update) a Hub dataset repo and upload ``out``'s contents to it.
+
+    ``changed_files``, when given, uploads only those paths (relative to ``out``)
+    instead of the whole folder: a re-push after ``--append`` only adds new data/
+    episode/video files and rewrites the small metadata files, so re-uploading
+    episodes already on the Hub (potentially a lot of encoded video) is wasted
+    bandwidth every time more demos come in.
 
     Returns the dataset's URL on the Hub.
     """
@@ -67,5 +75,14 @@ def push_to_hub(out: Path, repo_id: str, private: bool = False) -> str:
         ) from exc
     api = HfApi()
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
-    api.upload_folder(repo_id=repo_id, repo_type="dataset", folder_path=str(out))
+    if changed_files is None:
+        api.upload_folder(repo_id=repo_id, repo_type="dataset", folder_path=str(out))
+    else:
+        for rel in changed_files:
+            api.upload_file(
+                path_or_fileobj=str(out / rel),
+                path_in_repo=str(rel),
+                repo_id=repo_id,
+                repo_type="dataset",
+            )
     return f"https://huggingface.co/datasets/{repo_id}"
