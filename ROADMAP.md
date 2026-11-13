@@ -26,9 +26,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       becomes an `action.<name>`/`observation.state.<name>` candidate, picked by the
       same leader/follower-style name hints as joints.
 - [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
-      writes a dataset card (source bags, sync stats, config used). Follow-up: once
-      `--append` lands, re-push should update the card and only upload new/changed files
-      instead of re-uploading the whole dataset.
+      writes a dataset card (source bags, sync stats, config used). A re-push after
+      `--append` now regenerates the card and uploads only the files that changed
+      (new data/episode/video files plus the small metadata files rewritten in place)
+      instead of re-uploading the whole dataset, including every episode already on the
+      Hub.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [x] **Chunk data files by size.** The writer now splits the data parquet across
@@ -431,3 +433,19 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-13: `--push-to-hub` after `--append` now uploads only what changed instead of
+  the whole dataset again. `write_dataset` never modifies a file already on disk when
+  appending -- each call only adds new data/episode/video files alongside the old ones
+  (verified by re-reading `writer.py`'s append path) -- so `cli._convert` can diff the
+  output directory's file listing from before/after an append conversion and upload
+  exactly the new files, plus `meta/info.json`, `meta/stats.json`, `meta/tasks.parquet`
+  and `README.md` (the files `write_dataset`/the dataset card always rewrite in place).
+  `push_to_hub` gained an optional `changed_files` list; passing `None` (a first push, or
+  any push without `--append`) keeps the previous whole-folder upload.
+  `tests/test_hub.py::test_cli_push_to_hub_after_append_uploads_only_new_and_metadata_files`
+  checks the new file list (new data/episode files and the rewritten metadata included,
+  the first episode's untouched data file excluded). Closes the follow-up left when
+  `--append` shipped: for a long-running collection where new demos are appended and
+  pushed repeatedly, the old behavior re-uploaded every episode's data and video on
+  every single push, which gets slower and more wasteful (in bandwidth and Hub storage
+  churn) the larger the dataset grows -- exactly the workflow `--append` exists for.

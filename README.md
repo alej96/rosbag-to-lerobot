@@ -41,7 +41,9 @@ one small YAML file.
   (e.g. a gripper command on `std_msgs/Float64`) as `action.<name>`/
   `observation.state.<name>` candidates, using the same name hints as joints
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
-  dataset card (source bags, sync quality, features); needs the `hub` extra
+  dataset card (source bags, sync quality, features); needs the `hub` extra. Re-pushing
+  after `--append` uploads only the new episodes (and the small metadata files that
+  change on every write) instead of the whole dataset again
 - `msg_dir` registers custom message types from `.msg` files for bags that use types
   `rosbags` doesn't ship and that aren't embedded in the bag itself
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`
@@ -151,7 +153,9 @@ names -- whether from `names_from` or an explicit `names:` list) as the dataset 
 at `-o`; `--append` checks this and fails with a clear error otherwise. Episode and
 frame indices continue from the existing dataset, new data/video files are added
 alongside the old ones, and `meta/stats.json` is recomputed over the combined dataset.
-`--append` and `--overwrite` can't be used together.
+`--append` and `--overwrite` can't be used together. Combined with `--push-to-hub`, only
+the new episodes (plus the metadata files rewritten on every call) are uploaded, not the
+whole dataset again.
 
 ### Large conversions
 
