@@ -26,9 +26,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       becomes an `action.<name>`/`observation.state.<name>` candidate, picked by the
       same leader/follower-style name hints as joints.
 - [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
-      writes a dataset card (source bags, sync stats, config used). Follow-up: once
-      `--append` lands, re-push should update the card and only upload new/changed files
-      instead of re-uploading the whole dataset.
+      writes a dataset card (source bags, sync stats, config used), now covering every
+      episode the dataset has ever had (not just the most recent `convert` call) so a
+      re-push after `--append` doesn't drop earlier bags from the card -- see the
+      2026-11-14 log entry. Remaining follow-up: only upload new/changed files on
+      re-push instead of re-uploading the whole dataset.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [x] **Chunk data files by size.** The writer now splits the data parquet across
@@ -431,3 +433,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-14: Fixed `hub.dataset_card`: it built the "Source bags" table straight from
+  the `ConversionReport`s of whichever `convert` call just ran, so pushing a dataset
+  again after `--append` produced a README that silently dropped every bag from
+  earlier `convert` calls -- the episodes are still in the dataset (`info.json`'s
+  `total_episodes` counts them), but the card no longer named the bag that produced
+  them. None of the LeRobot-schema files under `meta/` record which bag produced which
+  episode, so `convert` now persists that provenance itself in `meta/source_bags.json`
+  (bag name, segment, frames, stale frames, max gap), merging onto the existing log on
+  `--append` instead of overwriting it; `dataset_card` reads this full history instead
+  of the latest call's reports. This file is bag2lerobot's own bookkeeping, not part of
+  the LeRobot v3.0 schema, so it can't affect `pytest -m lerobot`.
+  `tests/test_hub.py::test_dataset_card_after_append_still_lists_earlier_bags`
+  reproduces it (fails on the old code since no log file existed yet to read from the
+  first call, and the card would have shown only the second bag; passes now with both).
+  Picked over "Stream extraction of a single huge bag" again (now deferred sixteen
+  sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete correctness gap in a
+  real two-feature combination (`--append` + `--push-to-hub`), found while reading
+  `hub.py` and `convert.py` for the "re-push should update the card" follow-up the
+  original "Push to the Hub" item already flagged.
