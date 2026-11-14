@@ -140,7 +140,35 @@ def convert(
         if created and out.exists():
             shutil.rmtree(out)
         raise
+    _record_source_log(out, reports, append)
     return reports
+
+
+def _record_source_log(out: Path, reports: list[ConversionReport], append: bool) -> None:
+    """Persist per-episode provenance (source bag, frames, sync quality) in
+    ``meta/source_bags.json``, merging onto any existing log when ``append=True``.
+
+    None of the LeRobot-schema files ``write_dataset`` produces (info.json, the episode
+    parquet, stats.json, ...) record which bag produced which episode, so without this a
+    Hub dataset card built after ``--append`` could only ever describe the bags from the
+    most recent ``convert`` call -- pushing again after growing an existing dataset
+    silently dropped every earlier episode's bag from the card, even though the episodes
+    themselves are still there. This file is bag2lerobot's own bookkeeping, not part of
+    the LeRobot dataset format, so it can't affect loading with ``LeRobotDataset``.
+    """
+    path = out / "meta" / "source_bags.json"
+    existing = json.loads(path.read_text()) if append and path.exists() else []
+    new = [
+        {
+            "bag": r.bag.name,
+            "segment": r.segment,
+            "frames": r.sync.frames,
+            "stale_frames": sum(s.stale_frames for s in r.sync.streams),
+            "max_gap_s": max((s.max_gap_s for s in r.sync.streams), default=0.0),
+        }
+        for r in reports
+    ]
+    path.write_text(json.dumps(existing + new, indent=2))
 
 
 def _seed_joint_order(out: Path, cfg: Config) -> dict[str, list[str]]:

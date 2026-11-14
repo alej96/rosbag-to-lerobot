@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from bag2lerobot.config import Config
-from bag2lerobot.convert import ConversionReport
 from bag2lerobot.writer import INDEX_FEATURES
 
 
@@ -13,9 +12,15 @@ class HubError(ValueError):
     pass
 
 
-def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[ConversionReport]) -> str:
+def dataset_card(repo_id: str, cfg: Config, info: dict, source_log: list[dict]) -> str:
     """Build a Hub dataset card (README.md) describing the bags, config and sync quality
-    that produced this dataset, so it's reviewable without re-running the conversion."""
+    that produced this dataset, so it's reviewable without re-running the conversion.
+
+    ``source_log`` is bag2lerobot's own per-episode provenance record
+    (``meta/source_bags.json``, written by ``convert``), covering every episode the
+    dataset has ever had -- not just the ones from the most recent ``convert`` call --
+    so a card built after ``--append`` still lists the bags from earlier calls too.
+    """
     lines = [
         "---",
         "license: mit",
@@ -39,11 +44,11 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
         "| bag | episode | frames | stale frames | max gap (s) |",
         "|---|---|---|---|---|",
     ]
-    for i, r in enumerate(reports):
-        label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
-        gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
-        lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
+    for i, rec in enumerate(source_log):
+        label = rec["bag"] if rec["segment"] == 0 else f"{rec['bag']} (segment {rec['segment']})"
+        lines.append(
+            f"| {label} | {i} | {rec['frames']} | {rec['stale_frames']} | {rec['max_gap_s']:.3f} |"
+        )
 
     lines += ["", "## Features", "", "| key | dtype | shape |", "|---|---|---|"]
     for key, feat in info["features"].items():

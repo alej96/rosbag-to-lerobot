@@ -194,7 +194,8 @@ def _convert(args) -> int:
         return 1
     if args.push_to_hub:
         info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
-        card = dataset_card(args.push_to_hub, cfg, info, reports)
+        source_log = json.loads((Path(args.out) / "meta" / "source_bags.json").read_text())
+        card = dataset_card(args.push_to_hub, cfg, info, source_log)
         (Path(args.out) / "README.md").write_text(card)
         url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
         print(f"pushed to {url}")
