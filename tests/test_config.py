@@ -89,6 +89,17 @@ def test_names_from_as_a_list_raises_a_clear_error():
         parse_config({"fps": 30, "features": {"a": {"topic": "/t", "names_from": ["name"]}}})
 
 
+def test_topic_as_a_list_raises_a_clear_error():
+    """'topic:' given as a list (e.g. a stray '- ' before the topic from a YAML
+    indentation typo) used to pass through unvalidated -- every other per-feature
+    string field ('field', 'names_from') already gets a clear type check, but 'topic'
+    itself never did. A list topic is unhashable, so `extract.extract_streams`'s
+    `by_topic.setdefault(spec.topic, [])` crashed with a raw, unhandled
+    'TypeError: unhashable type: list' instead of a clear ConfigError raised up front."""
+    with pytest.raises(ConfigError, match="'topic' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": ["/joint_states"]}}})
+
+
 def test_names_as_a_proper_list_is_unaffected():
     cfg = parse_config(
         {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": ["x", "y", "z"]}}}
