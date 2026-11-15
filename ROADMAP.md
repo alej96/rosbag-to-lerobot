@@ -113,6 +113,37 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
+- **`ci.yml`'s `lerobot-compat` job is broken and has blocked every auto-merge since
+  2026-11-11 (4 straight sessions' branches never merged, see below) -- needs a human
+  since `.github/workflows/` can't be touched here.** The job's
+  `pip install torch --index-url https://download.pytorch.org/whl/cpu` then
+  `pip install "lerobot[dataset]" -e ".[dev]"` resolves `torchvision==0.29.2` (the
+  newest release satisfying lerobot 0.7.0's `torchvision<0.30,>=0.22`), and every
+  `pytest -m lerobot` test fails identically with `RuntimeError: operator
+  torchvision::nms does not exist` while importing `lerobot.datasets.lerobot_dataset`
+  (`-> lerobot.transforms -> torchvision.io`). This isn't anything in this repo's code:
+  confirmed from PyPI's own file listing, `torchvision==0.29.2`'s wheels are tagged
+  `py3-none-*` (no compiled extension) on every platform, unlike `0.29.1` and every
+  earlier release, which ship normal `cp3*`-tagged wheels with one -- i.e. `0.29.2` is a
+  broken upstream release missing its native ops. Verified the fix: with `torch==2.15.0`
+  already installed (the version this job's `--index-url` step currently resolves),
+  `pip install "torchvision==0.29.1"` imports fine (`from torchvision.io import
+  decode_image, encode_jpeg`, the same import chain `lerobot` needs), where `0.29.2`
+  reproduces the exact CI error. Fix: in `lerobot-compat`, pin
+  `pip install torch torchvision==0.29.1 --index-url
+  https://download.pytorch.org/whl/cpu` (installing both from the same index together
+  avoids a separate, possibly mismatched `torchvision` resolution from default PyPI) --
+  or just pin `torchvision<0.29.2` -- and bump the pin once upstream ships a fixed
+  `0.29.x`/`0.30`. Same pin should go in CLAUDE.md's "Commands" section, which documents
+  the same two-step install for local runs.
+  Four branches already have real, tested fixes stuck behind this (each passed `ruff`
+  and the full `pytest -q` on both Python versions; only `lerobot-compat` failed, so no
+  PR was ever opened for any of them): `claude/2026-11-11-fix-hub-stale-frames-double-count`,
+  `claude/2026-11-12-append-push-hub-card`, `claude/2026-11-13-hub-append-incremental-push`,
+  `claude/2026-11-14-source-bags-log-for-append-push`. Each branched from `main` independently
+  (not stacked on the previous day's branch, since none had merged), so they likely
+  overlap/conflict in `hub.py` and need manual reconciliation (probably in date order) once
+  CI is fixed, rather than merging automatically.
 
 ## Log
 
@@ -431,3 +462,30 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-15: Found that `ci.yml`'s `lerobot-compat` job has been failing for four
+  straight days (2026-11-11 through 2026-11-14) on every branch, for a reason that has
+  nothing to do with this repo's code: it resolves `torchvision==0.29.2`, a broken
+  upstream release missing its compiled extension (confirmed via PyPI's own wheel
+  listing and by reproducing + fixing the exact import failure with `torchvision==0.29.1`
+  installed instead). Every one of those four days' branches had real, fully-tested
+  fixes (Hub dataset-card bugs around `--append`) that passed lint and the full test
+  suite but never got a PR opened, because `lerobot-compat` gates it and
+  `.github/workflows/` can't be edited from here. Logged the diagnosis, the verified
+  fix (pin `torchvision==0.29.1`/`<0.29.2` in that job, installed together with `torch`
+  from the same `--index-url`) and the four stuck branch names under "Needs the owner",
+  since only a human can land it. Rather than let a fifth branch pile up behind the same
+  wall, or risk colliding with those four independently-branched, likely-conflicting
+  fixes in `hub.py`, shipped a different, real, unrelated bug found while auditing
+  `config.py` for the same gap several previous sessions' field-validation fixes closed:
+  `topic` -- the one field every single feature needs -- was never type-checked, unlike
+  `field`/`fields`/`names`/`names_from`/`task`/`robot_type`/`split_on`/`split_csv`/
+  `msg_dir`, all of which got this exact fix on earlier days. A YAML indentation typo
+  (`topic:` written as a one-item list instead of a scalar) used to reach
+  `extract.extract_streams`'s `by_topic.setdefault(spec.topic, [])` and crash with a raw,
+  unhandled `TypeError: unhashable type: 'list'` instead of a clear `ConfigError`.
+  `tests/test_config.py::test_topic_as_a_list_raises_a_clear_error` reproduces it (fails
+  on the old code with the unhandled `TypeError`, passes now). Picked over "Stream
+  extraction of a single huge bag" again (now deferred sixteen sessions running, for the
+  same reason as before: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review).
