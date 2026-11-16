@@ -135,3 +135,21 @@ def test_non_mapping_sync_raises_a_clear_error():
     ConfigError."""
     with pytest.raises(ConfigError, match="'sync' must be a mapping"):
         parse_config({**BASE, "sync": ["hold"]})
+
+
+@pytest.mark.parametrize("bad", ["false", "no", "0", "true", ["false"]])
+def test_trim_to_overlap_as_a_string_raises_a_clear_error_instead_of_corrupting_silently(bad):
+    """'sync.trim_to_overlap' went straight into ``bool(...)``, which is truthy for any
+    non-empty string -- so a config that quotes the value (e.g. 'trim_to_overlap: "false"',
+    plausible from a templated or copy-pasted config where every value gets quoted) silently
+    produced ``trim_to_overlap=True`` instead of the intended False, with no error at all,
+    silently changing how each episode is trimmed. Every other sync.* field already raises
+    a clear ConfigError for the wrong type; this one didn't."""
+    with pytest.raises(ConfigError, match="sync.trim_to_overlap must be true or false"):
+        parse_config({**BASE, "sync": {"trim_to_overlap": bad}})
+
+
+def test_trim_to_overlap_defaults_true_and_accepts_a_real_bool():
+    assert parse_config(BASE).trim_to_overlap is True
+    cfg = parse_config({**BASE, "sync": {"trim_to_overlap": False}})
+    assert cfg.trim_to_overlap is False
