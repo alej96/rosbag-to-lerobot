@@ -113,6 +113,53 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
+- **`ci.yml`'s `lerobot-compat` job has failed on every single branch pushed since
+  2026-11-06 (10 straight days as of today, 2026-11-16), and `.github/workflows/` can't
+  be edited from an autonomous session, so only a human can fix it.** Because
+  `auto-merge.yml`'s `merge` job `needs: ci` (the reusable `ci.yml`, which includes
+  `lerobot-compat`), every one of those branches never even got a PR opened, let alone
+  merged -- confirmed via the GitHub Actions run history (`auto-merge` workflow runs for
+  each branch below all show `conclusion: failure`, `merge` job `skipped`). That's 10
+  real, independently-tested daily fixes stuck as branches only, not just the 4 the
+  previous session found (it only looked back to 2026-11-11):
+  - `claude/2026-11-06-trim-to-overlap-validation` (config.py) -- **duplicates today's
+    fix below**; pick either, discard the other.
+  - `claude/2026-11-07-reject-non-string-topic` (config.py) -- **duplicates**
+    `claude/2026-11-15-reject-non-string-topic` below; pick either.
+  - `claude/2026-11-08-duplicate-joint-names` (extract.py)
+  - `claude/2026-11-09-reject-unloadable-long-video-episode` (writer.py)
+  - `claude/2026-11-10-dataset-card-stale-frames` (hub.py)
+  - `claude/2026-11-11-fix-hub-stale-frames-double-count` (hub.py, follow-up on 11-10's
+    fix -- check these two together first, in order)
+  - `claude/2026-11-12-append-push-hub-card` (hub.py) -- **overlaps**
+    `claude/2026-11-14-source-bags-log-for-append-push` below: both fix the same
+    "Hub dataset card loses earlier bags' history across `--append`" bug independently,
+    with different, incompatible implementations (`meta/conversion_log.json` vs
+    `meta/source_bags.json`). Pick one implementation, not both.
+  - `claude/2026-11-13-hub-append-incremental-push` (hub.py) -- independent of the
+    other two hub.py branches (only touches `push_to_hub`'s upload path), but based on
+    the *old*, buggy `dataset_card` signature; it'll need a small rebase onto whichever
+    of 11-12/11-14 is kept.
+  - `claude/2026-11-14-source-bags-log-for-append-push` (hub.py) -- see 11-12.
+  - `claude/2026-11-15-reject-non-string-topic` (config.py) -- see 11-07.
+
+  Root cause, confirmed by reading the actual `lerobot-compat` job logs (not just
+  inferred): `pytest -q -m lerobot` fails every time with
+  `RuntimeError: operator torchvision::nms does not exist` while importing `lerobot`,
+  the classic signature of `torch` and `torchvision` being an ABI-incompatible pair.
+  The job's last success (2026-11-05) shows `pip install "lerobot[dataset]" -e ".[dev]"`
+  *replacing* the `torch` wheel the prior step had installed from the `cpu` index
+  (`torch<2.12.0,>=2.7` from `lerobot`'s own dependency pin conflicts with it) and
+  resolving a fresh, mutually-compatible `torch`+`torchvision` pair from regular PyPI
+  (`torch-2.11.0` / `torchvision-0.26.0`); every run from 2026-11-06 onward resolves an
+  incompatible pair instead (this sandbox can't reach `download.pytorch.org` through its
+  proxy to reproduce and pin an exact fix locally). The fix needs a human to pin a
+  verified-compatible `torch`/`torchvision` pair in `ci.yml`'s `lerobot-compat` job (or
+  drop the separate `pip install torch --index-url .../whl/cpu` step and let
+  `pip install "lerobot[dataset]"` resolve `torch`+`torchvision` together the way it did
+  through 2026-11-05, if a CPU-only wheel isn't actually required), then reconcile and
+  re-push the 10 branches above (several are mutually exclusive, see notes) once
+  `lerobot-compat` is green again.
 
 ## Log
 
@@ -431,3 +478,26 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-16: Fixed `config.parse_config`: `sync.trim_to_overlap` went straight into
+  `bool(...)`, which is truthy for any non-empty string -- so a config that quotes the
+  value (`trim_to_overlap: "false"`, plausible from a templated or copy-pasted config
+  where every value gets quoted) silently produced `trim_to_overlap=True` instead of the
+  intended `False`, with no error at all, silently changing how every episode is trimmed.
+  Every other `sync.*` field already rejects the wrong type; this one didn't.
+  `tests/test_config.py::
+  test_trim_to_overlap_as_a_string_raises_a_clear_error_instead_of_corrupting_silently`
+  reproduces it (fails on the old code with the string silently accepted as `True`, passes
+  now with a clear `ConfigError`). The much bigger finding this session, documented in
+  full under "Needs the owner": auditing why several recent sessions' branches never
+  showed up as merged PRs revealed `ci.yml`'s `lerobot-compat` job has actually been
+  failing on *every* branch since 2026-11-06 (10 straight days, confirmed by reading the
+  GitHub Actions run history directly, not just the 4 days the 2026-11-15 session had
+  found by looking back less far) -- so this session's own branch cannot merge either,
+  and neither can nine days of real, already-tested fixes sitting unmerged, several of
+  which (this one included) independently duplicate each other because each session
+  started from a `main` that never got any of the previous days' fixes. Still shipped a
+  real, tested fix today rather than nothing, since the branch will merge once a human
+  lands the `ci.yml` fix; picked `trim_to_overlap` specifically because it was the
+  pre-existing gap in `config.py`'s `sync.*` validation coverage, found before
+  discovering it (and almost everything else easy to fix in `config.py`/`extract.py`/
+  `writer.py`/`hub.py`) was already fixed on one of the ten stuck branches.
