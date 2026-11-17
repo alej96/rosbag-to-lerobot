@@ -109,6 +109,13 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       explaining that H.264's yuv420p needs both dimensions even. `_open_video_streams`
       now checks every image feature's resolution before opening any container and
       raises a clear `ValueError` naming the feature and its resolution.
+- [x] **Fix the Hub dataset card after `--append`.** `--push-to-hub` rebuilt the
+      "Source bags" table from only the episodes the most recent `convert` call
+      produced, so re-pushing after `--append` silently dropped every earlier bag's row
+      and mislabeled the remaining ones with episode numbers restarting from 0 instead
+      of the dataset's real `episode_index`. `convert` now records each episode's
+      source bag in `meta/source_bags.json`, extended (not replaced) on `--append`, and
+      `dataset_card` reads the whole history from there.
 
 ## Needs the owner
 
@@ -431,3 +438,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-17: Fixed `hub.dataset_card`'s "Source bags" table after `--append`:
+  `cli._convert` passed it only the `ConversionReport`s from the most recent `convert`
+  call, so re-running `--push-to-hub` after `--append` silently dropped every earlier
+  bag's row from the regenerated README and mislabeled the remaining ones with episode
+  numbers restarting from 0 (`enumerate(reports)`) instead of the dataset's real
+  `episode_index` -- exactly backwards from the card's stated purpose ("reviewable
+  without re-running the conversion"). `convert` now writes each episode's source bag,
+  segment and sync quality to `meta/source_bags.json`, extending (not replacing) it on
+  `--append`, and `dataset_card` takes the dataset's `out` path and reads the whole
+  history from there instead of one call's `reports`.
+  `tests/test_hub.py::test_dataset_card_keeps_earlier_bags_after_append` reproduces it
+  (fails on the old code with the first bag's row and its correct episode number both
+  missing, passes now). Picked over "Stream extraction of a single huge bag" again (now
+  deferred sixteen sessions running, for the same reason as before: it needs `sync.py`
+  to resample incrementally while a window's bounds are still being discovered, which
+  risks the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch
+  that auto-merges with no review) because this was a concrete, silently-incomplete-and-
+  mislabeled Hub artifact in the combination of two already-shipped features
+  (`--append` and `--push-to-hub`), found by exercising that combination directly rather
+  than re-reading one file in isolation.
