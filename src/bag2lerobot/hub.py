@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from bag2lerobot.config import Config
-from bag2lerobot.convert import ConversionReport
 from bag2lerobot.writer import INDEX_FEATURES
 
 
@@ -13,9 +13,20 @@ class HubError(ValueError):
     pass
 
 
-def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[ConversionReport]) -> str:
+def dataset_card(repo_id: str, cfg: Config, info: dict, out: Path) -> str:
     """Build a Hub dataset card (README.md) describing the bags, config and sync quality
-    that produced this dataset, so it's reviewable without re-running the conversion."""
+    that produced this dataset, so it's reviewable without re-running the conversion.
+
+    The "Source bags" table comes from ``out/meta/source_bags.json`` (written by every
+    ``convert`` call, including ``--append``ed ones), not just the episodes the most
+    recent ``convert`` call produced -- otherwise re-pushing after ``--append`` would
+    silently drop every earlier bag's row, and mislabel the remaining ones with episode
+    numbers that restart from 0 instead of the dataset's real ``episode_index``. A
+    dataset appended to before this field existed has no history for its older episodes;
+    those rows are simply missing rather than guessed at.
+    """
+    source_bags_path = out / "meta" / "source_bags.json"
+    source_bags = json.loads(source_bags_path.read_text()) if source_bags_path.exists() else []
     lines = [
         "---",
         "license: mit",
@@ -39,11 +50,12 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
         "| bag | episode | frames | stale frames | max gap (s) |",
         "|---|---|---|---|---|",
     ]
-    for i, r in enumerate(reports):
-        label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
-        gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
-        lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
+    for row in source_bags:
+        label = row["bag"] if row["segment"] == 0 else f"{row['bag']} (segment {row['segment']})"
+        lines.append(
+            f"| {label} | {row['episode_index']} | {row['frames']} | {row['stale_frames']} | "
+            f"{row['max_gap_s']:.3f} |"
+        )
 
     lines += ["", "## Features", "", "| key | dtype | shape |", "|---|---|---|"]
     for key, feat in info["features"].items():

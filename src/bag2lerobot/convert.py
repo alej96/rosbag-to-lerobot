@@ -128,7 +128,7 @@ def convert(
                 result.images = {}
 
     try:
-        write_dataset(
+        info = write_dataset(
             out,
             episodes(),
             cfg.fps,
@@ -140,7 +140,31 @@ def convert(
         if created and out.exists():
             shutil.rmtree(out)
         raise
+    _record_source_bags(out, reports, append, info)
     return reports
+
+
+def _record_source_bags(
+    out: Path, reports: list[ConversionReport], append: bool, info: dict
+) -> None:
+    """Append this call's per-episode source-bag provenance to ``meta/source_bags.json``,
+    so a dataset card built after ``--append`` can still describe every episode's source
+    bag, not just the ones from the most recent ``convert`` call."""
+    path = out / "meta" / "source_bags.json"
+    existing = json.loads(path.read_text()) if append and path.exists() else []
+    offset = info["total_episodes"] - len(reports)
+    for i, r in enumerate(reports):
+        existing.append(
+            {
+                "episode_index": offset + i,
+                "bag": r.bag.name,
+                "segment": r.segment,
+                "frames": r.sync.frames,
+                "stale_frames": sum(s.stale_frames for s in r.sync.streams),
+                "max_gap_s": max((s.max_gap_s for s in r.sync.streams), default=0.0),
+            }
+        )
+    path.write_text(json.dumps(existing, indent=2))
 
 
 def _seed_joint_order(out: Path, cfg: Config) -> dict[str, list[str]]:

@@ -43,10 +43,10 @@ def test_push_to_hub_creates_repo_and_uploads(tmp_path, monkeypatch):
 def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp_path):
     bag = make_bag(name="demo")
     out = tmp_path / "ds"
-    reports = convert([bag], load_config(config_file), out)
+    convert([bag], load_config(config_file), out)
     info = json.loads((out / "meta" / "info.json").read_text())
 
-    card = dataset_card("me/my-dataset", load_config(config_file), info, reports)
+    card = dataset_card("me/my-dataset", load_config(config_file), info, out)
 
     assert "me/my-dataset" in card
     assert "demo" in card  # source bag name
@@ -56,6 +56,25 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_dataset_card_keeps_earlier_bags_after_append(make_bag, config_file, tmp_path):
+    """A re-push after --append used to rebuild the card from only the episodes the
+    latest convert() call produced, silently dropping every earlier bag's row and
+    mislabeling the remaining ones with episode numbers that restarted from 0 instead
+    of the dataset's real episode_index."""
+    cfg = load_config(config_file)
+    out = tmp_path / "ds"
+    convert([make_bag(name="demo1")], cfg, out)
+    convert([make_bag(name="demo2")], cfg, out, append=True)
+    info = json.loads((out / "meta" / "info.json").read_text())
+
+    card = dataset_card("me/my-dataset", cfg, info, out)
+
+    assert "demo1" in card
+    assert "demo2" in card
+    assert "| demo1 | 0 |" in card
+    assert "| demo2 | 1 |" in card
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(
