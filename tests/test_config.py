@@ -129,6 +129,22 @@ def test_feature_max_staleness_s_as_a_list_raises_a_clear_error():
         parse_config({"fps": 30, "features": {"a": {"topic": "/t", "max_staleness_s": [0.1]}}})
 
 
+@pytest.mark.parametrize("bad_topic", [None, "", 42, ["/t"], {"name": "/t"}])
+def test_bad_topic_raises_a_clear_error_instead_of_corrupting_silently(bad_topic):
+    """'topic:' with no value (e.g. a stray blank line after the key), an empty string,
+    or any other non-string (a list/mapping/number from a YAML typo) used to pass
+    straight through unvalidated into FeatureSpec.topic -- every *other* feature field
+    (fields/names/names_from/sync/max_staleness_s) already gets a clear type check, but
+    'topic' itself never did. extract_streams/extract_image_streams then looked the spec
+    up by this bogus key, never found it among the bag's (string) topic names, and tried
+    to report that via ``', '.join(missing)`` -- which crashes with a raw, unhandled
+    TypeError ('sequence item 0: expected str instance, NoneType found') for anything
+    that isn't itself a string, instead of the clear 'bag2lerobot: ...' message every
+    other bad-config field already gives."""
+    with pytest.raises(ConfigError, match="'topic' must be a non-empty string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": bad_topic}}})
+
+
 def test_non_mapping_sync_raises_a_clear_error():
     """'sync:' written as a list instead of a mapping (e.g. '- hold') used to reach
     ``sync.get(...)`` and crash with a raw AttributeError instead of a clear
