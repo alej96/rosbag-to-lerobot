@@ -113,6 +113,22 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
+- **`ci.yml`'s `lerobot-compat` job has failed on every branch pushed since 2026-11-06**
+  (13 straight days as of 2026-11-18), blocking `auto-merge` for all of them. Every
+  failure is the same `RuntimeError: operator torchvision::nms does not exist` --
+  `pip install torch --index-url https://download.pytorch.org/whl/cpu` followed by a
+  separate `pip install "lerobot[dataset]" -e ".[dev]"` lets pip resolve a `torchvision`
+  that doesn't match the already-installed `torch` build, an ABI mismatch, not a bug in
+  this repo's code. 13 branches (`claude/2026-11-06-...` through `claude/2026-11-18-...`)
+  sit unmerged on origin with real, individually-tested fixes, some duplicating each
+  other's work (e.g. two branches independently reject a bad feature `topic`) because
+  each session reads `ROADMAP.md` on `main`, which never received these entries since
+  none of them merged. This can't be fixed from an autonomous session: `.github/workflows/`
+  changes are blocked by design (they need a human) and this sandbox can't reach
+  `download.pytorch.org` to verify a pinned fix locally. Needs a human to pin a
+  compatible `torch`/`torchvision` pair in `lerobot-compat` (install both together with
+  explicit versions, not two independent unpinned `pip install` calls) and then reconcile
+  the 13 stuck branches once merging works again.
 
 ## Log
 
