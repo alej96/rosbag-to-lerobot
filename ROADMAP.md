@@ -431,3 +431,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-18: Fixed `config.parse_config`: a feature's `topic` had no type validation at
+  all, unlike every other feature field (`fields`, `names`, `names_from`, `sync`,
+  `max_staleness_s`) which already got a clear type check. `topic:` with no value (a
+  stray blank line after the key, parsing to `None` in YAML) or any other non-string
+  (a list, mapping or number from a typo) used to pass straight through into
+  `FeatureSpec.topic`. `extract_streams`/`extract_image_streams` then looked the spec up
+  by this bogus key, never found it among the bag's (string) topic names, and tried to
+  name it in the "topic(s) not in bag" error via `', '.join(missing)` -- which itself
+  crashes with a raw, unhandled `TypeError` (`sequence item 0: expected str instance,
+  NoneType found`) instead of ever reaching a clear `ConfigError`, for every bad config
+  in this family, not just an edge case. `parse_config` now rejects a missing, empty or
+  non-string `topic` up front. `tests/test_config.py::
+  test_bad_topic_raises_a_clear_error_instead_of_corrupting_silently` reproduces five
+  cases (`None`, `""`, `42`, a list, a mapping) that all fail on the old code with
+  `DID NOT RAISE ConfigError` and pass now. Picked over "Stream extraction of a single
+  huge bag" again (now deferred sixteen sessions running, for the same reason as before:
+  it needs `sync.py` to resample incrementally while a window's bounds are still being
+  discovered, which risks the "never drop a frame"/"timestamp == frame_index / fps"
+  invariants on a branch that auto-merges with no review) because this was the one
+  feature field the long string-of-sessions config-validation sweep had never actually
+  reached, found by checking which fields still lacked the type check every sibling
+  field already has.
