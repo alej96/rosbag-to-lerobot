@@ -431,3 +431,23 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-19: Fixed `hub.dataset_card`: the Hub dataset card's "stale frames" column
+  summed every configured stream's own `stale_frames` instead of using the existing
+  per-episode `SyncResult.stale_frames` (already the max across streams, the same
+  per-stream numbers `cli.py`'s `--strict` check reads). A gap that stales every stream
+  at once -- the common case, e.g. the whole recording pausing, not just one topic
+  dropping out -- got counted once per stream, so a dataset with 3 configured streams
+  and one shared idle gap reported 3x the actual number of stale frames in its card, the
+  one place meant to tell someone browsing the Hub whether the dataset's sync quality is
+  good enough to train on. `tests/test_hub.py::
+  test_dataset_card_stale_count_is_per_episode_not_summed_across_streams` reproduces it
+  (fails on the old code with `12 == 4` for three streams sharing one idle gap, passes
+  now). Found while reading `hub.py` against `sync.py`'s already-defined
+  `SyncResult.stale_frames` property, which turned out to have no caller anywhere in the
+  codebase -- a sign it was written for exactly this and then not actually used. Picked
+  over "Stream extraction of a single huge bag" again (now deferred sixteen sessions
+  running, for the same reason as before: it needs `sync.py` to resample incrementally
+  while a window's bounds are still being discovered, which risks the "never drop a
+  frame"/"timestamp == frame_index / fps" invariants on a branch that auto-merges with
+  no review) because this was a concrete, misleading-published-metric bug with a clean,
+  already-defined fix one property away.
