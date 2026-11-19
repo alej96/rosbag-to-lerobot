@@ -11,6 +11,7 @@ from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.convert import convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from tests.conftest import BagSpec
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -56,6 +57,31 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_dataset_card_stale_count_is_per_episode_not_summed_across_streams(
+    make_bag, config_file, tmp_path
+):
+    """The card's 'stale frames' column used to sum every stream's own stale_frames, so
+    a gap that hits every configured stream at once (e.g. the operator pauses the whole
+    recording) got counted once per stream instead of once per affected frame -- with
+    three streams sharing one idle gap, the card reported 3x the actual number of stale
+    frames in the episode."""
+    bag = make_bag(spec=BagSpec(idle_gap=(1.0, 1.4)))
+    out = tmp_path / "ds"
+    cfg = load_config(config_file)
+    reports = convert([bag], cfg, out)
+    info = json.loads((out / "meta" / "info.json").read_text())
+
+    sync = reports[0].sync
+    per_stream = [s.stale_frames for s in sync.streams]
+    assert len(per_stream) > 1 and min(per_stream) > 0  # the shared gap stales every stream
+    assert sum(per_stream) > sync.stale_frames  # the streams overlap, so summing overcounts
+
+    card = dataset_card("me/my-dataset", cfg, info, reports)
+    row = next(line for line in card.splitlines() if line.startswith(f"| {bag.name} "))
+    reported_stale = int(row.split("|")[4].strip())
+    assert reported_stale == sync.stale_frames
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(

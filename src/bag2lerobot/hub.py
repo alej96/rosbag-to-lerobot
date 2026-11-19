@@ -41,7 +41,12 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
     ]
     for i, r in enumerate(reports):
         label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
+        # r.sync.stale_frames is the episode-level count already used elsewhere (e.g.
+        # cli.py's --strict check looks at the same per-stream numbers this derives
+        # from); summing every stream's own stale_frames instead double- (or triple-)
+        # counts a frame that's stale on more than one stream at once, which is the
+        # common case when every topic loses data together (e.g. a recording pause).
+        stale = r.sync.stale_frames
         gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
         lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
 
