@@ -431,3 +431,26 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-20: Fixed `extract.split_boundaries`: a `std_msgs/Bool` `split_on` topic was
+  documented and intended to start a new episode only on a rising edge (a `true`
+  following a `false`), but the code only filtered out `false` messages -- every `true`
+  message counted as its own boundary. A `Bool` "recording active" topic is commonly
+  published continuously (every driver tick, held `true` for a demo's whole duration)
+  rather than as a single momentary pulse, so a real setup using that pattern split one
+  bag into one near-empty episode per message instead of one per demo (and could even
+  fail outright, since a single-message window can have no overlapping data).
+  `tests/test_split.py::test_split_on_bool_ignores_repeated_true_without_an_edge` and
+  `::test_convert_splits_on_continuous_bool_not_per_message` reproduce it (both fail on
+  the old code -- the second with a raised `SyncError` from a too-narrow window, not just
+  a wrong episode count -- and pass now with true edge detection). `tests/conftest.py`'s
+  `episode_starts` now also auto-inserts a momentary reset `false` between consecutive
+  listed starts, since a single isolated `true` pulse (what every existing `split_on`
+  test models) is itself a rising edge only when something resets the signal first; a new
+  `episode_start_spans`/`episode_start_hz` models the continuously-published case that
+  exposed the bug. Picked over "Stream extraction of a single huge bag" again (now
+  deferred sixteen sessions running, for the same reason as before: it needs `sync.py` to
+  resample incrementally while a window's bounds are still being discovered, which risks
+  the "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete behavior gap against this
+  feature's own documented contract, found while re-reading `split_on`'s Bool handling
+  for the same kind of silent-mismatch issue several recent sessions have been hunting.

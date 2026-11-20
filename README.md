@@ -90,9 +90,12 @@ bag2lerobot init my_run.mcap_dir/ -o cfg.yaml --fps 30
 ### Splitting many demos out of one bag
 
 If a bag holds several demonstrations recorded back to back, set `split_on` in the config
-to a topic that marks each demo's start, e.g. a `std_msgs/Bool` (only `data: true`
-messages count, so you can publish `false` to mark an end without splitting on it) or
-`std_msgs/Empty` published once per demo:
+to a topic that marks each demo's start, e.g. a `std_msgs/Bool` or `std_msgs/Empty`
+published once per demo. A `std_msgs/Bool` only starts a new episode on a rising edge (a
+`true` that follows a `false`, or the first message), not on every `true` message -- so a
+topic published continuously (`true` for a demo's whole duration, `false` while idle, as a
+"recording active" state topic commonly is) still produces one boundary per demo instead
+of one per message:
 
 ```yaml
 split_on: /episode_start
