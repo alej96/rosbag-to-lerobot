@@ -47,6 +47,12 @@ class BagSpec:
     compressed_camera_hz: float = 0.0  # > 0 publishes /cam/image_compressed (jpeg)
     episode_starts: list[float] = field(default_factory=list)  # /episode_start times (s)
     episode_start_type: str = "bool"  # "bool" (std_msgs/Bool, data=True) or "empty"
+    # /episode_start spans (start, end) during which a std_msgs/Bool is published
+    # continuously True at episode_start_hz (and continuously False outside every span),
+    # like a real "recording active" state topic -- as opposed to episode_starts, which
+    # models a single momentary True/False pulse per listed time.
+    episode_start_spans: list[tuple[float, float]] = field(default_factory=list)
+    episode_start_hz: float = 10.0
     idle_gap: tuple[float, float] | None = None  # (start, end) seconds with no messages at all
     burst_topic: str | None = None  # topic to publish `burst_count` std_msgs msgs on
     burst_count: int = 0  # ...almost all at the same bag timestamp, like a static /tf replay
@@ -168,9 +174,18 @@ def write_bag(path: Path, kind: str, spec: BagSpec) -> Path:
     if spec.episode_starts:
         is_bool = spec.episode_start_type == "bool"
         msgtype = "std_msgs/msg/Bool" if is_bool else "std_msgs/msg/Empty"
-        for t in spec.episode_starts:
+        for i, t in enumerate(spec.episode_starts):
             msg = T[msgtype](data=True) if is_bool else T[msgtype]()
             msgs.append((t, "/episode_start", msgtype, msg))
+            if is_bool and i + 1 < len(spec.episode_starts):
+                # a momentary pulse (true then back to false shortly after), not a
+                # continuously held true -- so each listed start is its own rising edge
+                msgs.append((t + 1e-3, "/episode_start", msgtype, T[msgtype](data=False)))
+    if spec.episode_start_spans:
+        msgtype = "std_msgs/msg/Bool"
+        for t in np.arange(0.0, spec.seconds, 1.0 / spec.episode_start_hz):
+            high = any(start <= t < end for start, end in spec.episode_start_spans)
+            msgs.append((float(t), "/episode_start", msgtype, T[msgtype](data=bool(high))))
     if spec.burst_topic and spec.burst_count > 1:
         msgtype = "std_msgs/msg/Float64" if spec.burst_numeric else "std_msgs/msg/Empty"
         burst_msg = T[msgtype](data=1.0) if spec.burst_numeric else T[msgtype]()

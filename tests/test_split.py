@@ -111,6 +111,42 @@ def test_split_boundaries_reads_timestamps(make_bag, start_type):
     assert boundaries[1] == pytest.approx(T0 + 1.7, abs=0.02)
 
 
+def test_split_on_bool_ignores_repeated_true_without_an_edge(make_bag):
+    """A std_msgs/Bool 'recording active' topic is often published continuously (every
+    driver tick, true for the whole demo) rather than as a single momentary pulse.
+    Before this fix, split_boundaries treated every True message as its own boundary
+    instead of only a rising edge, so a continuously-published signal split one bag
+    into one near-empty episode per message instead of one episode per demo."""
+    bag = make_bag(
+        spec=BagSpec(
+            seconds=3.0,
+            episode_start_spans=[(0.0, 1.3), (1.6, 3.0)],
+            episode_start_hz=10.0,
+        )
+    )
+    boundaries = split_boundaries(bag, "/episode_start", _split_cfg())
+    assert len(boundaries) == 2
+    assert boundaries[0] == pytest.approx(T0 + 0.0, abs=0.12)
+    assert boundaries[1] == pytest.approx(T0 + 1.6, abs=0.12)
+
+
+def test_convert_splits_on_continuous_bool_not_per_message(make_bag, split_config_file, tmp_path):
+    """Same bug as test_split_on_bool_ignores_repeated_true_without_an_edge, exercised
+    end to end: a continuously-published 'recording active' Bool must still produce one
+    episode per demo, not one per message on that topic."""
+    bag = make_bag(
+        spec=BagSpec(
+            seconds=3.0,
+            episode_start_spans=[(0.0, 1.3), (1.6, 3.0)],
+            episode_start_hz=10.0,
+        )
+    )
+    out = tmp_path / "ds"
+    reports = convert([bag], load_config(split_config_file), out)
+    assert len(reports) == 2
+    assert [r.segment for r in reports] == [0, 1]
+
+
 def test_split_topic_missing_lists_available(make_bag):
     bag = make_bag()
     with pytest.raises(ExtractError, match="not in bag"):

@@ -239,10 +239,15 @@ def extract_image_streams(path: str | Path, cfg: Config) -> dict[str, ImageStrea
 def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
     """Episode-start timestamps (s) from messages on ``topic``.
 
-    A ``std_msgs/Bool`` message starts a new episode only on a rising edge (``data``
-    True); any other message type (e.g. ``std_msgs/Empty``) starts a new episode on
-    every message. Each boundary marks where one episode ends and the next begins; data
-    before the first boundary belongs to no episode and is dropped.
+    A ``std_msgs/Bool`` message starts a new episode only on a rising edge: a ``True``
+    that follows a ``False`` (or is the first message), not every individual ``True``
+    message. This matters because a Bool "recording active" topic is commonly published
+    continuously (every driver tick, not once per event) -- without edge detection, a
+    topic held ``True`` for an entire demo would mark a new episode boundary on every one
+    of those messages instead of one boundary per demo. Any other message type (e.g.
+    ``std_msgs/Empty``) starts a new episode on every message, since it carries no state
+    to find an edge in. Each boundary marks where one episode ends and the next begins;
+    data before the first boundary belongs to no episode and is dropped.
     """
     with _reader(Path(path), cfg.msg_dir) as reader:
         conns = [c for c in reader.connections if c.topic == topic]
@@ -252,16 +257,24 @@ def split_boundaries(path: str | Path, topic: str, cfg: Config) -> list[float]:
                 f"{path}: split topic '{topic}' not in bag (available: {', '.join(available)})"
             )
         is_bool = conns[0].msgtype.endswith("Bool")
-        times = []
+        samples = []
         for conn, bag_t, raw in reader.messages(connections=conns):
             msg = _deserialize(reader, raw, conn, path)
-            if is_bool and not bool(msg.data):
-                continue
             t = _stamp(msg, bag_t) if cfg.time_source == "header" else bag_t / 1e9
-            times.append(t)
+            samples.append((t, bool(msg.data) if is_bool else True))
+    samples.sort(key=lambda s: s[0])
+    if is_bool:
+        times = []
+        was_high = False
+        for t, high in samples:
+            if high and not was_high:
+                times.append(t)
+            was_high = high
+    else:
+        times = [t for t, _ in samples]
     if not times:
         raise ExtractError(f"{path}: no episode-start messages found on '{topic}'")
-    return sorted(times)
+    return times
 
 
 def idle_gap_boundaries(
