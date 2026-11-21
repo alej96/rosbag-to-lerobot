@@ -25,7 +25,9 @@ one small YAML file.
   rejected with a clear error before encoding starts, rather than crashing inside ffmpeg.
   A truncated or corrupt frame (a dropped recording chunk, a driver bug) also raises a
   clear error naming the problem, instead of a raw `PIL.UnidentifiedImageError` or numpy
-  reshape crash.
+  reshape crash. A non-integer `fps` (e.g. copied from `inspect`'s reported camera rate)
+  encodes the video at that exact rate rather than rounding it, so the video's own frame
+  timing stays in sync with the data table instead of drifting over an episode.
 - Splits one bag with many demos into multiple episodes: on a topic (`split_on`),
   automatically wherever every stream goes idle (`split_idle_gap_s`), or from a CSV of
   time ranges labeled by an external tool (`split_csv`, optionally with a per-episode

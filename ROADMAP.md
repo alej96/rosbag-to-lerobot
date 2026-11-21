@@ -109,6 +109,14 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       explaining that H.264's yuv420p needs both dimensions even. `_open_video_streams`
       now checks every image feature's resolution before opening any container and
       raises a clear `ValueError` naming the feature and its resolution.
+- [x] **Fix video frame timing for a non-integer `fps`.** `_open_video_streams` opened
+      every video container with `rate=round(fps)`, so a fractional `fps` (e.g. one
+      copied straight from `inspect`'s reported camera rate, like `29.97`) got a video
+      stream whose own internal frame timing didn't match the exact `fps` used for the
+      data table's `timestamp` column and `info.json`'s declared `video.fps`. The video
+      and the per-frame row it's supposed to line up with drifted apart over an episode.
+      Now uses `Fraction(fps).limit_denominator(1_000_000)` as the stream's rate, which
+      reconstructs the exact rate for any fps with a short decimal expansion.
 
 ## Needs the owner
 
@@ -431,3 +439,32 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-21: Fixed `writer._open_video_streams`: it opened every video container with
+  `rate=round(fps)`, so a non-integer configured `fps` (e.g. `29.97`, plausibly copied
+  straight from `bag2lerobot inspect`'s reported camera rate, which is never rounded)
+  got a video stream whose own internal frame timing (PTS, spaced `1/round(fps)` apart)
+  didn't match the data table's `timestamp` column (`frame_index / fps`, the exact
+  value) or `info.json`'s declared `video.fps`. For a 29.97fps episode this drifts by
+  roughly 0.03s per 29 frames and keeps growing, so a video frame decoded by its
+  timestamp could land on the wrong row of data -- exactly the kind of mismatch this
+  project exists to prevent, just inside the video stream instead of the data table.
+  Confirmed empirically with PyAV: encoding frames at `rate=30` (29.97 rounded) placed
+  frame 4 at `t=0.133s`, not `4/29.97=0.1335s`; `rate=Fraction(29.97).limit_denominator(...)`
+  placed it at `0.13347s`, matching to the limits of float precision. Fixed by using
+  `Fraction(fps).limit_denominator(1_000_000)` as the video stream's rate, which
+  reconstructs the exact rate for any fps with a short decimal expansion (the realistic
+  case: a camera's native rate as reported by `inspect`) and the closest rational
+  approximation otherwise. `tests/test_video.py::
+  test_fractional_fps_video_frame_timing_matches_the_data_table` reproduces it (fails on
+  the old code with frame times off by ~0.03s at a tolerance of 1e-4s, passes now).
+  Found by reading `_open_video_streams` for anywhere a configured value might reach
+  PyAV/ffmpeg transformed in a way `info.json` doesn't record, the same angle that found
+  the odd-resolution and corrupt-frame bugs several sessions prior; picked over "Stream
+  extraction of a single huge bag" again (now deferred sixteen sessions running, for the
+  same reason as before: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because this
+  was a concrete, previously-untested LeRobot-compatibility gap with a realistic trigger
+  (an `fps` taken straight from `inspect`'s own output) that no existing test exercised,
+  since every synthetic-bag test and the generated-config path (which always rounds
+  `fps`) used an integer `fps`.
