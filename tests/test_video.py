@@ -60,6 +60,27 @@ def test_image_feature_is_encoded_to_mp4(make_bag, tmp_path):
     assert int(first[0, 0, 0]) < int(last[0, 0, 0])
 
 
+def test_fractional_fps_video_frame_timing_matches_the_data_table(make_bag, tmp_path):
+    """A non-integer fps (e.g. copied from `inspect`'s reported camera rate) used to be
+    rounded to the nearest integer for the video container's own frame rate, while the
+    data table's `timestamp` column (frame_index / fps) kept the exact value. The
+    video's internal frame timing then drifted away from the row it's supposed to match:
+    at frame 29 this bag's 29.97fps rounds to 30fps, a drift of 29/29.97 - 29/30 ~= 0.03s,
+    far outside this assertion's tolerance."""
+    fps = 29.97
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(IMAGE_CONFIG.replace("fps: 10", f"fps: {fps}"))
+    bag = make_bag(spec=BagSpec(seconds=1.0, camera_hz=60))
+    out = tmp_path / "ds"
+    convert([bag], load_config(cfg_path), out)
+
+    video_path = out / "videos" / "observation.images.cam" / "chunk-000" / "file-000.mp4"
+    container = av.open(str(video_path))
+    decoded = list(container.decode(video=0))
+    for i, frame in enumerate(decoded):
+        assert frame.time == pytest.approx(i / fps, abs=1e-4)
+
+
 def test_image_frames_span_episode_boundaries_in_one_video(make_bag, tmp_path):
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text(IMAGE_CONFIG)

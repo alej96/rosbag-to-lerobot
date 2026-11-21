@@ -6,6 +6,7 @@ import itertools
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -414,6 +415,15 @@ def _open_video_streams(
                 f"{VIDEO_CODEC} ({VIDEO_PIX_FMT}) needs both width and height even; crop or "
                 "pad the source images to an even size before converting"
             )
+    # av/libx264 needs a rational frame rate, not the exact float fps; rounding it to the
+    # nearest integer (e.g. 29.97 -> 30) used to make the container's own frame timing
+    # (its PTS values, spaced 1/rate apart) drift away from the data table's exact
+    # `timestamp` column (frame_index / fps) over an episode, so a non-integer fps (e.g.
+    # one copied straight from `inspect`'s reported camera rate) could hand LeRobot's
+    # video backend frames at the wrong times relative to the row it's looking up.
+    # `limit_denominator` reconstructs the exact rate for any fps with a short decimal
+    # expansion (29.97 -> 2997/100) and the closest rational approximation otherwise.
+    rate = Fraction(fps).limit_denominator(1_000_000)
     containers, streams = {}, {}
     for key in image_keys:
         path = out / VIDEO_PATH.format(
@@ -421,7 +431,7 @@ def _open_video_streams(
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         container = av.open(str(path), mode="w")
-        stream = container.add_stream(VIDEO_CODEC, rate=round(fps))
+        stream = container.add_stream(VIDEO_CODEC, rate=rate)
         h, w, _ = image_shapes[key]
         stream.height = h
         stream.width = w
