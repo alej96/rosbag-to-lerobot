@@ -10,7 +10,7 @@ import pytest
 from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.convert import convert
-from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from bag2lerobot.hub import HubError, dataset_card, episode_rows, push_to_hub
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -46,7 +46,7 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     reports = convert([bag], load_config(config_file), out)
     info = json.loads((out / "meta" / "info.json").read_text())
 
-    card = dataset_card("me/my-dataset", load_config(config_file), info, reports)
+    card = dataset_card("me/my-dataset", load_config(config_file), info, episode_rows(reports))
 
     assert "me/my-dataset" in card
     assert "demo" in card  # source bag name
@@ -56,6 +56,62 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_episode_rows_numbers_from_the_given_offset(make_bag, config_file, tmp_path):
+    bag = make_bag(name="demo")
+    reports = convert([bag], load_config(config_file), tmp_path / "ds")
+
+    rows = episode_rows(reports, episode_offset=3)
+
+    assert [r["episode"] for r in rows] == [3]
+
+
+def test_cli_push_to_hub_after_append_keeps_earlier_bags_in_card(
+    make_bag, config_file, tmp_path, monkeypatch
+):
+    """A re-push after --append used to overwrite README.md with a table built only from
+    the newly appended episodes, silently dropping every bag from earlier pushes even
+    though the dataset itself still holds their episodes."""
+    monkeypatch.setattr("bag2lerobot.cli.push_to_hub", lambda out, repo_id, private=False: "url")
+    out = tmp_path / "ds"
+
+    rc = main(
+        [
+            "convert",
+            str(make_bag(name="first")),
+            "-c",
+            str(config_file),
+            "-o",
+            str(out),
+            "--push-to-hub",
+            "me/my-dataset",
+        ]
+    )
+    assert rc == 0
+    first_card = (out / "README.md").read_text()
+    assert "first" in first_card
+
+    rc = main(
+        [
+            "convert",
+            str(make_bag(name="second")),
+            "-c",
+            str(config_file),
+            "-o",
+            str(out),
+            "--append",
+            "--push-to-hub",
+            "me/my-dataset",
+        ]
+    )
+    assert rc == 0
+    second_card = (out / "README.md").read_text()
+
+    assert "first" in second_card  # earlier bag must not be dropped from the card
+    assert "second" in second_card
+    # the appended episode continues the real episode_index instead of restarting at 0
+    assert "| second | 1 |" in second_card
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(

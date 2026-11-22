@@ -11,7 +11,7 @@ from bag2lerobot import __version__
 from bag2lerobot.config import ConfigError, load_config
 from bag2lerobot.convert import convert, preview_splits
 from bag2lerobot.extract import ExtractError, inspect_bag
-from bag2lerobot.hub import dataset_card, push_to_hub
+from bag2lerobot.hub import dataset_card, episode_rows, push_to_hub
 from bag2lerobot.init import generate_config
 from bag2lerobot.sync import SyncError
 from bag2lerobot.writer import DEFAULT_DATA_FILES_SIZE_IN_MB
@@ -194,7 +194,12 @@ def _convert(args) -> int:
         return 1
     if args.push_to_hub:
         info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
-        card = dataset_card(args.push_to_hub, cfg, info, reports)
+        rows_path = Path(args.out) / "meta" / "card_rows.json"
+        old_rows = json.loads(rows_path.read_text()) if args.append and rows_path.exists() else []
+        episode_offset = info["total_episodes"] - len(reports)
+        rows = old_rows + episode_rows(reports, episode_offset)
+        rows_path.write_text(json.dumps(rows))
+        card = dataset_card(args.push_to_hub, cfg, info, rows)
         (Path(args.out) / "README.md").write_text(card)
         url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
         print(f"pushed to {url}")

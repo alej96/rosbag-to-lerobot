@@ -13,9 +13,45 @@ class HubError(ValueError):
     pass
 
 
-def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[ConversionReport]) -> str:
+def episode_rows(reports: list[ConversionReport], episode_offset: int = 0) -> list[dict]:
+    """Per-episode summary rows for the dataset card's source-bags table, one per entry
+    in ``reports``, numbered starting at ``episode_offset``.
+
+    ``episode_offset`` should be the dataset's total episode count *before* this
+    conversion (0 for a fresh dataset): an ``--append`` conversion's ``reports`` only
+    covers the newly added episodes, so numbering them from 0 would both restart the
+    displayed episode index and collide with the earlier episodes' real
+    ``episode_index`` once the rows are combined across calls (see ``_convert``, which
+    persists rows from earlier pushes in ``meta/card_rows.json`` and carries them
+    forward).
+    """
+    rows = []
+    for i, r in enumerate(reports):
+        label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
+        stale = sum(s.stale_frames for s in r.sync.streams)
+        gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
+        rows.append(
+            {
+                "bag": label,
+                "episode": episode_offset + i,
+                "frames": r.sync.frames,
+                "stale": stale,
+                "gap": gap,
+            }
+        )
+    return rows
+
+
+def dataset_card(repo_id: str, cfg: Config, info: dict, rows: list[dict]) -> str:
     """Build a Hub dataset card (README.md) describing the bags, config and sync quality
-    that produced this dataset, so it's reviewable without re-running the conversion."""
+    that produced this dataset, so it's reviewable without re-running the conversion.
+
+    ``rows`` (from ``episode_rows``) covers every episode in the dataset, not just ones
+    from the latest conversion call: a re-push after ``--append`` must carry the earlier
+    push's rows forward (see ``_convert`` in ``cli.py``) or the card would silently drop
+    every bag converted before the most recent ``--append``, even though the dataset
+    itself still holds their episodes.
+    """
     lines = [
         "---",
         "license: mit",
@@ -39,11 +75,11 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
         "| bag | episode | frames | stale frames | max gap (s) |",
         "|---|---|---|---|---|",
     ]
-    for i, r in enumerate(reports):
-        label = r.bag.name if r.segment == 0 else f"{r.bag.name} (segment {r.segment})"
-        stale = sum(s.stale_frames for s in r.sync.streams)
-        gap = max((s.max_gap_s for s in r.sync.streams), default=0.0)
-        lines.append(f"| {label} | {i} | {r.sync.frames} | {stale} | {gap:.3f} |")
+    for row in rows:
+        lines.append(
+            f"| {row['bag']} | {row['episode']} | {row['frames']} | {row['stale']} | "
+            f"{row['gap']:.3f} |"
+        )
 
     lines += ["", "## Features", "", "| key | dtype | shape |", "|---|---|---|"]
     for key, feat in info["features"].items():
