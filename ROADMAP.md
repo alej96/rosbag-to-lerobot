@@ -26,9 +26,10 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       becomes an `action.<name>`/`observation.state.<name>` candidate, picked by the
       same leader/follower-style name hints as joints.
 - [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
-      writes a dataset card (source bags, sync stats, config used). Follow-up: once
-      `--append` lands, re-push should update the card and only upload new/changed files
-      instead of re-uploading the whole dataset.
+      writes a dataset card (source bags, sync stats, config used). The "re-push after
+      `--append` should update the card instead of dropping earlier bags" half of the
+      original follow-up shipped 2026-11-22. Remaining follow-up: only upload new/changed
+      files on a re-push instead of re-uploading the whole dataset each time.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [x] **Chunk data files by size.** The writer now splits the data parquet across
@@ -431,3 +432,25 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-22: Fixed `cli._convert`'s `--push-to-hub` card generation: re-pushing after
+  `--append` rebuilt `README.md`'s source-bags table from only the newly appended
+  episodes' `ConversionReport`s, silently dropping every bag from earlier pushes even
+  though the dataset itself (`info.json`'s `total_episodes`/`total_frames`) still held
+  their episodes -- exactly the "update the card" half of the follow-up noted when
+  `--append` shipped. The new episodes' rows were also numbered from 0, colliding with
+  the real `episode_index` of the dataset's earlier episodes once combined. `hub.py`
+  gained `episode_rows(reports, episode_offset)` to number rows correctly, and
+  `dataset_card` now takes rows (covering the whole dataset) instead of building them
+  from one call's `reports` internally; `cli._convert` persists rows from each push in
+  a new `meta/card_rows.json` sidecar and carries them forward on the next `--append`
+  push. `tests/test_hub.py::
+  test_cli_push_to_hub_after_append_keeps_earlier_bags_in_card` reproduces it (fails on
+  the old code with the first bag missing from the second card, passes now). Picked over
+  "Stream extraction of a single huge bag" again (now deferred sixteen sessions running,
+  for the same reason as before: it needs `sync.py` to resample incrementally while a
+  window's bounds are still being discovered, which risks the "never drop a
+  frame"/"timestamp == frame_index / fps" invariants on a branch that auto-merges with no
+  review) because this was a concrete, silently-data-dropping bug in a documented
+  `--append` + `--push-to-hub` workflow, found while reading `hub.py`/`cli.py` for the
+  "only upload new/changed files" follow-up and noticing the card side of that same
+  follow-up was never actually fixed.
