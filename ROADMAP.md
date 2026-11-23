@@ -431,3 +431,27 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-23: Fixed `config.parse_config`: a feature's `topic` had no type validation,
+  unlike every other string-typed config field. `topic` is a dict key downstream (in
+  `extract.extract_streams`/`extract_image_streams`'s `by_topic`), so a non-string value
+  (e.g. `topic: 30` from a stray unquoted number, or `topic: off`/`on` -- YAML's default
+  bool resolver turns an unquoted bare topic name like that into `False`/`True`, not a
+  string) never matched any of the bag's real topics, and the resulting "topic(s) not in
+  bag" error path (`', '.join(missing)`, listing the unmatched topics) crashed with a raw,
+  unhandled `TypeError` ('sequence item 0: expected str instance, int found') instead of a
+  clear `ConfigError` up front -- the same crash-to-clear-error gap as several previous
+  sessions' field-type fixes, just on `topic` instead of `names`/`fields`/`task`/etc.
+  `tests/test_config.py::test_topic_as_a_number_raises_a_clear_error` reproduces it (fails
+  on the old code with an unhandled `TypeError`, passes now with a clear `ConfigError`).
+  Picked over "Stream extraction of a single huge bag" again (now deferred sixteen
+  sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete crash-to-clear-error gap found
+  by checking every feature-spec field against the same type-validation coverage the
+  other fields already have. Also fixed the session's own environment: the container's
+  system Pillow package was missing its compiled `_imaging` extension (a broken distro
+  package, not a project dependency issue), so `pip install -e ".[dev]"` silently treated
+  `pillow>=10` as already satisfied and left `PIL.Image` unimportable; reinstalling it
+  with `--force-reinstall` cleared the baseline two test failures unrelated to this repo's
+  code before any real work started.
