@@ -81,6 +81,18 @@ def test_field_as_a_list_raises_a_clear_error():
         parse_config({"fps": 30, "features": {"a": {"topic": "/t", "field": ["position"]}}})
 
 
+def test_topic_as_a_number_raises_a_clear_error():
+    """'topic: 30' (e.g. a stray unquoted value, or a topic name YAML's bool/number
+    resolver mangles -- 'topic: off' parses to the bool False, not the string "off")
+    used to pass through unvalidated. 'topic' is a dict key, so every downstream lookup
+    against the bag's (string) connection topics missed, and the resulting error path
+    (``', '.join(missing)`` in extract.extract_streams/extract_image_streams, listing
+    the unmatched topics) crashed with a raw, unhandled TypeError ('sequence item 0:
+    expected str instance, int found') instead of a clear config error up front."""
+    with pytest.raises(ConfigError, match="'topic' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": 30}}})
+
+
 def test_names_from_as_a_list_raises_a_clear_error():
     """'names_from: [name]' (a list) instead of 'names_from: name' (a string) used to
     reach extract._get's `path.split(".")` with a list instead of a string and crash with
