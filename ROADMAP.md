@@ -431,3 +431,20 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-24: Fixed `hub.dataset_card`: the per-episode "stale frames" column in the
+  pushed Hub dataset card summed `StreamReport.stale_frames` across every configured
+  stream, so a frame that's stale on several streams at once (e.g. two features sourced
+  from the same gappy topic, or just any episode with more than one lagging stream) was
+  counted once per stream instead of once per frame -- inflating the quality metric the
+  card exists to make trustworthy, exactly the double-counting `SyncResult.stale_frames`
+  (a max across streams, not a sum) already exists to avoid. The card never used that
+  property. `tests/test_hub.py::test_dataset_card_stale_frames_is_not_double_counted_across_streams`
+  reproduces it with two features reading the same gappy topic (fails on the old code
+  with the card showing double the real count, passes now). Picked over "Stream
+  extraction of a single huge bag" again (now deferred sixteen sessions running, for the
+  same reason as before: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because
+  this was a concrete, silently-misleading quality metric in the Hub card -- the one
+  artifact a dataset's downstream users see without re-running the conversion -- found
+  while reading `hub.py` against the `stale_frames` invariant `sync.py` already encodes.
