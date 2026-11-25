@@ -11,6 +11,7 @@ from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.convert import convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from tests.conftest import BagSpec
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -56,6 +57,44 @@ def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp
     assert "observation.images" not in card  # no image feature in this config
     assert "timestamp" not in card  # index/bookkeeping column, not a user feature
     assert str(info["total_episodes"]) in card
+
+
+def test_dataset_card_stale_frames_not_double_counted_across_streams(tmp_path, make_bag):
+    """The card's per-episode 'stale frames' column summed StreamReport.stale_frames
+    across every configured stream, so a frame that's stale on more than one stream at
+    once (e.g. two features reading the same topic that loses data) was counted once per
+    affected stream instead of once per frame -- it could report more stale frames than
+    the episode even has. SyncResult.stale_frames (a max across streams) already exists
+    to answer this correctly; the card just didn't use it."""
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        "fps: 30\n"
+        "features:\n"
+        "  action:\n"
+        "    topic: /leader/joint_states\n"
+        "    field: position\n"
+        "    names_from: name\n"
+        "  action2:\n"
+        "    topic: /leader/joint_states\n"
+        "    field: velocity\n"
+        "    names_from: name\n"
+    )
+    bag = make_bag(spec=BagSpec(leader_gap=(1.0, 2.0)))
+    out = tmp_path / "ds"
+    cfg = load_config(cfg_path)
+    reports = convert([bag], cfg, out)
+    info = json.loads((out / "meta" / "info.json").read_text())
+
+    # both features read the same topic, so the same frames go stale on both at once:
+    # the episode-level count must equal that shared per-stream count, not their sum.
+    streams = reports[0].sync.streams
+    assert reports[0].sync.stale_frames > 0
+    assert {s.stale_frames for s in streams} == {reports[0].sync.stale_frames}
+
+    card = dataset_card("me/my-dataset", cfg, info, reports)
+    row = next(line for line in card.splitlines() if line.startswith(f"| {bag.name} |"))
+    reported_stale = int(row.split("|")[4].strip())
+    assert reported_stale == reports[0].sync.stale_frames
 
 
 def test_cli_push_to_hub_writes_card_and_uploads(
