@@ -113,6 +113,52 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
 ## Needs the owner
 
 - Publish to PyPI. Announce on the LeRobot Discord or ROS Discourse once video ships.
+- **`ci.yml`'s `lerobot-compat` job has failed on every branch pushed since 2026-11-06,
+  blocking auto-merge completely for 19 straight days (confirmed from the GitHub Actions
+  run history, not inferred: every `auto-merge` run from `claude/2026-11-06-*` through
+  `claude/2026-11-24-*` shows the `ci` job failing and the `merge` job skipped).** Root
+  cause (per the 2026-11-15/16/18 sessions' job-log investigation): `pip install torch
+  --index-url https://download.pytorch.org/whl/cpu` then `pip install "lerobot[dataset]"`
+  as two separate, unpinned commands can resolve a `torch`/`torchvision` pair whose
+  compiled ops don't match ABI (`RuntimeError: operator torchvision::nms does not exist`),
+  depending on whatever `torchvision` build happens to be newest on the day CI runs; this
+  is unrelated to this repo's code. Since `auto-merge.yml`'s `merge` job `needs: ci`, a
+  failing `lerobot-compat` blocks the *entire* job, including the "open a PR" step -- so
+  **no PR was ever opened for any of these branches**, not even a closed/rejected one.
+  This sandbox's proxy can't reach `download.pytorch.org` to verify an exact pinned fix,
+  but the likely remedy is pinning `torchvision` to a version known compatible with the
+  resolved `torch` build (e.g. install both together, or add an explicit `torchvision==`
+  pin) in the `lerobot-compat` job. This can't be fixed from an autonomous session: edits
+  under `.github/workflows/` are refused by design (`auto-merge.yml`'s own guard: "This PR
+  changes .github/workflows/, so it was not auto-merged").
+- **19 branches (`claude/2026-11-06-*` through `claude/2026-11-24-*`) sit on `origin`
+  with real, locally-tested fixes that never became a PR**, because each day's session
+  starts from `origin/main`'s `ROADMAP.md` (which never received any of their Log
+  entries either, for the same reason) with no way to see what prior stuck branches
+  already did. Several independently re-fixed the *same* bug:
+  - `claude/2026-11-10-dataset-card-stale-frames`, `2026-11-11-fix-hub-stale-frames-double-count`,
+    `2026-11-19-hub-stale-frames-fix`, `2026-11-24-hub-card-stale-frames` -- all four fix
+    `hub.dataset_card` summing `stale_frames` across streams instead of taking the max.
+    Shipped for real this time as part of today's session (see Log below); the other
+    three are now redundant and can be deleted once reviewed.
+  - `claude/2026-11-12-append-push-hub-card`, `2026-11-14-source-bags-log-for-append-push`,
+    `2026-11-17-append-hub-card-history`, `2026-11-22-append-push-card-carries-history` --
+    four attempts at keeping the Hub card's "Source bags" table covering bags added by an
+    earlier `--append` call, not just the latest `convert`. Still unmerged and unreconciled;
+    worth a dedicated session once CI is fixed, comparing the four approaches rather than
+    assuming the most recent is best.
+  - `claude/2026-11-07-reject-non-string-topic`, `2026-11-15-reject-non-string-topic`,
+    `2026-11-23-reject-non-string-topic` -- three copies of the same non-string `topic`
+    validation; `2026-11-18-reject-bad-feature-topic` is a superset (also rejects missing/
+    empty topic) and is likely the one to keep.
+  - `claude/2026-11-06-trim-to-overlap-validation`, `2026-11-16-trim-to-overlap-validation-and-ci-audit`
+    -- two copies of the same `sync.trim_to_overlap` bool validation.
+  - Singly-fixed (no duplicate found): `2026-11-08-duplicate-joint-names`,
+    `2026-11-09-reject-unloadable-long-video-episode`, `2026-11-20-split-on-bool-rising-edge`,
+    `2026-11-21-fractional-fps-video-timing`.
+  Recommend reviewing and cherry-picking the real fixes from these branches (one per
+  duplicated bug) once `ci.yml` is fixed, then deleting the rest, rather than re-deriving
+  them a third or fourth time.
 
 ## Log
 
@@ -431,3 +477,24 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-25: Fixed `hub.dataset_card`: the per-episode "stale frames" column in the Hub
+  dataset card summed `StreamReport.stale_frames` across every configured stream, so a
+  frame stale on more than one stream at once (e.g. two features reading the same topic
+  that loses data, or -- the common real case -- every topic going quiet together during
+  one gap) was counted once per affected stream instead of once per frame, which could
+  report more stale frames than the episode even has.
+  `SyncResult.stale_frames` (a max across streams) already exists to answer this
+  correctly and is what `--strict` already checks; the card just summed the per-stream
+  numbers instead of using it.
+  `tests/test_hub.py::test_dataset_card_stale_frames_not_double_counted_across_streams`
+  reproduces it with two features reading the same gappy topic (fails on the old code,
+  44 reported vs. 22 actual stale frames; passes now). Spent most of this session on a
+  bigger finding first (see "Needs the owner"): `ci.yml`'s `lerobot-compat` job has been
+  silently failing on every branch since 2026-11-06, so no PR was ever opened for 19
+  days of sessions' work, including this exact one-line fix, independently rediscovered
+  and reimplemented four times (2026-11-10, -11, -19, -24) with nobody able to see the
+  others. Picked this fix to actually land once CI is fixed (over yet another fresh bug
+  hunt, or over "Stream extraction of a single huge bag", deferred sixteen sessions
+  running for the reason recorded in prior entries) specifically because its own stuck
+  history is the clearest evidence of the CI problem, and because shipping it for real
+  this time means three of those four branches can simply be deleted instead of reviewed.
