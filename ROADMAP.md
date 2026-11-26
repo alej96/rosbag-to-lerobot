@@ -412,6 +412,27 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   no review) because this was a concrete crash-to-clear-error gap, in the same family as
   several previous sessions' config-validation fixes, found by checking every remaining
   unguarded `float()`/`.get()` call in `config.py` after those fixes.
+- 2026-11-26: Fixed `config.parse_config`: a feature's `topic` had no type validation,
+  unlike every other string-typed feature field (`field`, `names_from`). `topic: [/t]`
+  (a YAML list from a stray '- ' before the topic name, or any other non-string) used
+  to pass straight through into `FeatureSpec.topic` and reach
+  `extract.extract_streams`'s `by_topic.setdefault(spec.topic, [])` with an unhashable
+  value, crashing with a raw, unhandled `TypeError` ("unhashable type: 'list'") instead
+  of the clear `ConfigError` every other malformed feature field already gets.
+  `tests/test_config.py::test_topic_as_a_list_raises_a_clear_error` reproduces it (fails
+  on the old code with an uncaught `TypeError`, passes now with a clear `ConfigError`).
+  Picked over "Stream extraction of a single huge bag" again (now deferred sixteen
+  sessions running, for the same reason as before: it needs `sync.py` to resample
+  incrementally while a window's bounds are still being discovered, which risks the
+  "never drop a frame"/"timestamp == frame_index / fps" invariants on a branch that
+  auto-merges with no review) because this was a concrete crash-to-clear-error gap in
+  the same family as several previous config-validation fixes, found by checking every
+  feature-spec field's type coverage against the ones already fixed (`field`, `fields`,
+  `names`, `names_from`, `sync`, `max_staleness_s`) and noticing `topic` -- despite being
+  the one field every feature requires -- was the one left unchecked. Also fixed, in the
+  baseline environment for this session only (not a code change): the system `pillow`
+  package was missing its compiled `_imaging` extension, which made every image/video
+  test fail at collection with `ImportError`; reinstalling `pillow` via pip fixed it.
 - 2026-11-05: Fixed `config.parse_config`: `task` and `robot_type` had no type
   validation, unlike every other string-typed config field (`split_on`, `split_csv`,
   `msg_dir`). `task: [pick, the, cube]` (a YAML list from a stray indentation typo)
