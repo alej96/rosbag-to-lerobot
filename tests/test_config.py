@@ -89,6 +89,17 @@ def test_names_from_as_a_list_raises_a_clear_error():
         parse_config({"fps": 30, "features": {"a": {"topic": "/t", "names_from": ["name"]}}})
 
 
+def test_topic_as_a_list_raises_a_clear_error():
+    """'topic: [/t]' (a list, e.g. a stray '- ' before the topic name) instead of
+    'topic: /t' (a string) used to pass through unvalidated -- unlike every other
+    string-typed feature field ('field', 'names_from') -- and reach
+    extract.extract_streams's `by_topic.setdefault(spec.topic, [])` with an unhashable
+    list, crashing with a raw TypeError ("unhashable type: 'list'") instead of a clear
+    ConfigError naming the feature."""
+    with pytest.raises(ConfigError, match="'topic' must be a string"):
+        parse_config({"fps": 30, "features": {"a": {"topic": ["/t"]}}})
+
+
 def test_names_as_a_proper_list_is_unaffected():
     cfg = parse_config(
         {"fps": 30, "features": {"a": {"topic": "/t", "field": "data", "names": ["x", "y", "z"]}}}
