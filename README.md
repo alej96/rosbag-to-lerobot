@@ -41,7 +41,10 @@ one small YAML file.
   (e.g. a gripper command on `std_msgs/Float64`) as `action.<name>`/
   `observation.state.<name>` candidates, using the same name hints as joints
 - `--push-to-hub user/name` uploads the dataset to the Hugging Face Hub and writes a
-  dataset card (source bags, sync quality, features); needs the `hub` extra
+  dataset card (source bags, sync quality, features); needs the `hub` extra. Re-pushing
+  after `--append` only uploads the new episode's files plus the small meta files that
+  get rewritten (`info.json`, `stats.json`, `tasks.parquet`, the card) instead of
+  re-uploading every earlier episode's data and video files again
 - `msg_dir` registers custom message types from `.msg` files for bags that use types
   `rosbags` doesn't ship and that aren't embedded in the bag itself
 - Output is checked in CI by loading it with the real `lerobot` `LeRobotDataset`

@@ -26,9 +26,11 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
       becomes an `action.<name>`/`observation.state.<name>` candidate, picked by the
       same leader/follower-style name hints as joints.
 - [x] **Push to the Hub.** `--push-to-hub user/name` uploads with `huggingface_hub` and
-      writes a dataset card (source bags, sync stats, config used). Follow-up: once
-      `--append` lands, re-push should update the card and only upload new/changed files
-      instead of re-uploading the whole dataset.
+      writes a dataset card (source bags, sync stats, config used).
+- [x] **Re-push after `--append` only uploads new/changed files.** Follow-up from the
+      item above: once `--append` landed, re-pushing a large dataset after adding a few
+      episodes used to re-upload the whole thing (every earlier episode's video and data
+      files included) instead of just what the append call actually added.
 - [x] **Per-feature resampling policies.** Per-feature `sync` override (e.g. hold for
       gripper commands, linear for joint positions) and `max_staleness_s`.
 - [x] **Chunk data files by size.** The writer now splits the data parquet across
@@ -431,3 +433,27 @@ through **Next up**; each item ships in one session with tests (synthetic bags i
   branch that auto-merges with no review) because this was a concrete silent-data-
   corruption gap in the same family as several previous config-validation fixes, found
   by checking every config field for the same string/type coverage after that pattern.
+- 2026-11-27: Re-pushing a dataset to the Hub after `--append` now only uploads the
+  files that call actually added or rewrote, instead of `out`'s entire contents again.
+  `write_dataset` under `--append` only ever adds new data/episodes/video files
+  alongside the existing ones (never rewrites them) except for three small meta files
+  (`info.json`, `stats.json`, `tasks.parquet`) it always recomputes over the combined
+  dataset, plus the dataset card `cli.py` regenerates on every push; `convert --append
+  --push-to-hub` previously re-uploaded everything anyway (`HfApi.upload_folder` with no
+  `allow_patterns`), which is the exact cost a user adding episodes to an
+  already-pushed, possibly large (video-heavy) dataset incrementally would most want to
+  avoid. `push_to_hub` now takes an optional `allow_patterns` list, and the CLI computes
+  it by snapshotting `out`'s files before an append conversion and diffing against the
+  files present afterward, unioned with the always-rewritten set.
+  `tests/test_hub.py::test_cli_append_push_to_hub_only_uploads_new_and_changed_files`
+  reproduces the old behavior (the mocked upload call's `allow_patterns` was always
+  `None`, i.e. "upload everything") and asserts the new one (the first episode's data
+  and episode-manifest files are excluded, the new episode's and the always-rewritten
+  files are included). A fresh, non-append push still passes `allow_patterns=None` and
+  uploads the full folder, matching prior behavior exactly. Picked over "Stream
+  extraction of a single huge bag" again (now deferred sixteen sessions running, for the
+  same reason as before: it needs `sync.py` to resample incrementally while a window's
+  bounds are still being discovered, which risks the "never drop a frame"/"timestamp ==
+  frame_index / fps" invariants on a branch that auto-merges with no review) because this
+  was a concrete, scoped follow-up explicitly left open when `--append` landed, and
+  real for anyone iterating on a dataset already on the Hub rather than converting once.
