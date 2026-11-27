@@ -54,8 +54,19 @@ def dataset_card(repo_id: str, cfg: Config, info: dict, reports: list[Conversion
     return "\n".join(lines)
 
 
-def push_to_hub(out: Path, repo_id: str, private: bool = False) -> str:
+def push_to_hub(
+    out: Path,
+    repo_id: str,
+    private: bool = False,
+    allow_patterns: list[str] | None = None,
+) -> str:
     """Create (or update) a Hub dataset repo and upload ``out``'s contents to it.
+
+    ``allow_patterns``, when given, restricts the upload to those paths (relative to
+    ``out``) instead of ``out``'s entire contents -- the rest is assumed already on the
+    Hub from an earlier push. Used after ``--append`` so that re-pushing a large dataset
+    only uploads the episodes/files the append call actually added or rewrote, not the
+    video and data files from every earlier push too.
 
     Returns the dataset's URL on the Hub.
     """
@@ -67,5 +78,10 @@ def push_to_hub(out: Path, repo_id: str, private: bool = False) -> str:
         ) from exc
     api = HfApi()
     api.create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True)
-    api.upload_folder(repo_id=repo_id, repo_type="dataset", folder_path=str(out))
+    api.upload_folder(
+        repo_id=repo_id,
+        repo_type="dataset",
+        folder_path=str(out),
+        allow_patterns=allow_patterns,
+    )
     return f"https://huggingface.co/datasets/{repo_id}"

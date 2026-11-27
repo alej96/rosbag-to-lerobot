@@ -11,6 +11,7 @@ from bag2lerobot.cli import main
 from bag2lerobot.config import load_config
 from bag2lerobot.convert import convert
 from bag2lerobot.hub import HubError, dataset_card, push_to_hub
+from tests.conftest import BagSpec
 
 
 def test_push_to_hub_without_extra_raises_clear_error(tmp_path, monkeypatch):
@@ -26,8 +27,8 @@ def test_push_to_hub_creates_repo_and_uploads(tmp_path, monkeypatch):
         def create_repo(self, repo_id, repo_type, private, exist_ok):
             calls["create_repo"] = (repo_id, repo_type, private, exist_ok)
 
-        def upload_folder(self, repo_id, repo_type, folder_path):
-            calls["upload_folder"] = (repo_id, repo_type, folder_path)
+        def upload_folder(self, repo_id, repo_type, folder_path, allow_patterns=None):
+            calls["upload_folder"] = (repo_id, repo_type, folder_path, allow_patterns)
 
     fake_module = type(sys)("huggingface_hub")
     fake_module.HfApi = FakeApi
@@ -37,7 +38,26 @@ def test_push_to_hub_creates_repo_and_uploads(tmp_path, monkeypatch):
 
     assert url == "https://huggingface.co/datasets/me/my-dataset"
     assert calls["create_repo"] == ("me/my-dataset", "dataset", True, True)
-    assert calls["upload_folder"] == ("me/my-dataset", "dataset", str(tmp_path))
+    assert calls["upload_folder"] == ("me/my-dataset", "dataset", str(tmp_path), None)
+
+
+def test_push_to_hub_passes_allow_patterns_through(tmp_path, monkeypatch):
+    calls = {}
+
+    class FakeApi:
+        def create_repo(self, repo_id, repo_type, private, exist_ok):
+            pass
+
+        def upload_folder(self, repo_id, repo_type, folder_path, allow_patterns=None):
+            calls["allow_patterns"] = allow_patterns
+
+    fake_module = type(sys)("huggingface_hub")
+    fake_module.HfApi = FakeApi
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_module)
+
+    push_to_hub(tmp_path, "me/my-dataset", allow_patterns=["meta/info.json", "data/x.parquet"])
+
+    assert calls["allow_patterns"] == ["meta/info.json", "data/x.parquet"]
 
 
 def test_dataset_card_summarizes_bags_config_and_sync(make_bag, config_file, tmp_path):
@@ -63,8 +83,8 @@ def test_cli_push_to_hub_writes_card_and_uploads(
 ):
     calls = []
 
-    def fake_push(out, repo_id, private=False):
-        calls.append((out, repo_id, private))
+    def fake_push(out, repo_id, private=False, allow_patterns=None):
+        calls.append((out, repo_id, private, allow_patterns))
         return f"https://huggingface.co/datasets/{repo_id}"
 
     monkeypatch.setattr("bag2lerobot.cli.push_to_hub", fake_push)
@@ -86,7 +106,70 @@ def test_cli_push_to_hub_writes_card_and_uploads(
     )
 
     assert rc == 0
-    assert calls == [(out, "me/my-dataset", True)]
+    # a fresh (non-append) push has nothing to restrict against: upload everything
+    assert calls == [(out, "me/my-dataset", True, None)]
     assert "pushed to https://huggingface.co/datasets/me/my-dataset" in capsys.readouterr().out
     assert (out / "README.md").exists()
     assert "me/my-dataset" in (out / "README.md").read_text()
+
+
+def test_cli_append_push_to_hub_only_uploads_new_and_changed_files(
+    make_bag, config_file, tmp_path, monkeypatch
+):
+    """Re-pushing after --append used to re-upload the whole dataset (every earlier
+    episode's data/video files included) even though append only ever adds new files
+    alongside the old ones. The CLI should now restrict the re-upload to what actually
+    changed: the new episode's files, plus the handful of small meta files (and the
+    card) that get rewritten over the combined dataset on every push."""
+    calls = []
+
+    def fake_push(out, repo_id, private=False, allow_patterns=None):
+        calls.append(allow_patterns)
+        return f"https://huggingface.co/datasets/{repo_id}"
+
+    monkeypatch.setattr("bag2lerobot.cli.push_to_hub", fake_push)
+    out = tmp_path / "ds"
+
+    assert (
+        main(
+            [
+                "convert",
+                str(make_bag(name="a")),
+                "-c",
+                str(config_file),
+                "-o",
+                str(out),
+                "--push-to-hub",
+                "me/my-dataset",
+            ]
+        )
+        == 0
+    )
+    assert calls == [None]  # first push: nothing to narrow against, upload everything
+
+    assert (
+        main(
+            [
+                "convert",
+                str(make_bag(name="b", spec=BagSpec(seed=2))),
+                "-c",
+                str(config_file),
+                "-o",
+                str(out),
+                "--append",
+                "--push-to-hub",
+                "me/my-dataset",
+            ]
+        )
+        == 0
+    )
+    patterns = calls[-1]
+    assert patterns is not None
+    assert "data/chunk-000/file-001.parquet" in patterns
+    assert "meta/episodes/chunk-000/file-001.parquet" in patterns
+    for always in ("README.md", "meta/info.json", "meta/stats.json", "meta/tasks.parquet"):
+        assert always in patterns
+    # the first episode's own data/episodes files weren't touched by the append, so a
+    # re-push shouldn't re-upload them
+    assert "data/chunk-000/file-000.parquet" not in patterns
+    assert "meta/episodes/chunk-000/file-000.parquet" not in patterns

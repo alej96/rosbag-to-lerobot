@@ -160,6 +160,9 @@ def _convert(args) -> int:
     if args.append and args.overwrite:
         print("bag2lerobot: --append and --overwrite can't be used together", file=sys.stderr)
         return 2
+    pre_existing = None
+    if args.push_to_hub and args.append and Path(args.out).exists():
+        pre_existing = _relative_files(Path(args.out))
     reports = convert(
         args.bags,
         cfg,
@@ -196,9 +199,30 @@ def _convert(args) -> int:
         info = json.loads((Path(args.out) / "meta" / "info.json").read_text())
         card = dataset_card(args.push_to_hub, cfg, info, reports)
         (Path(args.out) / "README.md").write_text(card)
-        url = push_to_hub(Path(args.out), args.push_to_hub, private=args.private)
+        allow_patterns = None
+        if pre_existing is not None:
+            # --append only ever adds new data/episodes/video files alongside the old
+            # ones (never rewrites them), except for these three small meta files and
+            # the card, which this call just rewrote over the combined dataset; restrict
+            # the re-push to exactly those instead of re-uploading every earlier episode's
+            # video and data files again.
+            always_rewritten = {
+                "README.md",
+                "meta/info.json",
+                "meta/stats.json",
+                "meta/tasks.parquet",
+            }
+            now_existing = _relative_files(Path(args.out))
+            allow_patterns = sorted((now_existing - pre_existing) | always_rewritten)
+        url = push_to_hub(
+            Path(args.out), args.push_to_hub, private=args.private, allow_patterns=allow_patterns
+        )
         print(f"pushed to {url}")
     return 0
+
+
+def _relative_files(root: Path) -> set[str]:
+    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
 
 if __name__ == "__main__":
